@@ -1,0 +1,402 @@
+[
+  {
+    "id": "Q001",
+    "type": "deterministic",
+    "question": "How many requests per minute can a Pro plan make?",
+    "expected_answer": "1,000 requests per minute",
+    "source_file": "reference/rate_limits.md",
+    "fact_type": "rate_limit",
+    "keywords": ["pro", "requests", "minute"]
+  },
+  {
+    "id": "Q002",
+    "type": "deterministic",
+    "question": "What is the rate limit for Free plan users per day?",
+    "expected_answer": "1,000 requests per day",
+    "source_file": "reference/rate_limits.md",
+    "fact_type": "rate_limit",
+    "keywords": ["free", "requests", "day"]
+  },
+  {
+    "id": "Q003",
+    "type": "deterministic",
+    "question": "How many webhook endpoints can a Starter plan configure?",
+    "expected_answer": "10 webhook endpoints",
+    "source_file": "reference/rate_limits.md",
+    "fact_type": "rate_limit",
+    "keywords": ["starter", "webhook", "endpoints"]
+  },
+  {
+    "id": "Q004",
+    "type": "deterministic",
+    "question": "What is the burst limit for the Enterprise plan?",
+    "expected_answer": "20,000 requests in a 10-second burst window",
+    "source_file": "reference/rate_limits.md",
+    "fact_type": "rate_limit",
+    "keywords": ["enterprise", "burst", "limit"]
+  },
+  {
+    "id": "Q005",
+    "type": "deterministic",
+    "question": "How many refunds can I create per payment?",
+    "expected_answer": "Maximum 5 refunds per payment",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["refund", "maximum", "payment"]
+  },
+  {
+    "id": "Q006",
+    "type": "deterministic",
+    "question": "Within how many days must a refund be created after the original payment?",
+    "expected_answer": "180 days",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["refund", "days", "window"]
+  },
+  {
+    "id": "Q007",
+    "type": "deterministic",
+    "question": "What is the minimum amount for a partial refund?",
+    "expected_answer": "50 cents",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["partial", "refund", "minimum", "amount"]
+  },
+  {
+    "id": "Q008",
+    "type": "deterministic",
+    "question": "How long is the capture window for an authorized payment?",
+    "expected_answer": "7 days",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["capture", "window", "days", "authorization"]
+  },
+  {
+    "id": "Q009",
+    "type": "deterministic",
+    "question": "What currencies does NexusPay support?",
+    "expected_answer": "EUR, USD, GBP, CHF, SEK, NOK, DKK",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["currency", "supported", "currencies"]
+  },
+  {
+    "id": "Q010",
+    "type": "deterministic",
+    "question": "What is the maximum number of metadata keys allowed per payment?",
+    "expected_answer": "50 key-value pairs, with keys up to 40 characters",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["metadata", "maximum", "keys"]
+  },
+  {
+    "id": "Q011",
+    "type": "deterministic",
+    "question": "What is the maximum trial period for a subscription?",
+    "expected_answer": "90 days",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["trial", "maximum", "days", "subscription"]
+  },
+  {
+    "id": "Q012",
+    "type": "deterministic",
+    "question": "What HTTP status code does the API return when the rate limit is exceeded?",
+    "expected_answer": "HTTP 429",
+    "source_file": "reference/error_codes.md",
+    "fact_type": "error_code",
+    "keywords": ["rate", "limit", "exceeded", "status", "429"]
+  },
+  {
+    "id": "Q013",
+    "type": "deterministic",
+    "question": "What error code is returned when an API key has been revoked?",
+    "expected_answer": "revoked_api_key",
+    "source_file": "reference/error_codes.md",
+    "fact_type": "error_code",
+    "keywords": ["revoked", "api", "key", "error"]
+  },
+  {
+    "id": "Q014",
+    "type": "deterministic",
+    "question": "What error code is returned when a refund exceeds the 180-day window?",
+    "expected_answer": "refund_window_expired",
+    "source_file": "reference/error_codes.md",
+    "fact_type": "error_code",
+    "keywords": ["refund", "window", "expired", "error"]
+  },
+  {
+    "id": "Q015",
+    "type": "deterministic",
+    "question": "What is the current API version?",
+    "expected_answer": "v2, released on 2025-01-15",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "version",
+    "keywords": ["api", "version", "current"]
+  },
+  {
+    "id": "Q016",
+    "type": "deterministic",
+    "question": "When will API v1 be sunset?",
+    "expected_answer": "2026-01-15",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "version",
+    "keywords": ["v1", "sunset", "deprecated"]
+  },
+  {
+    "id": "Q017",
+    "type": "deterministic",
+    "question": "What is the maximum page size when listing payments?",
+    "expected_answer": "100 items per page",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["pagination", "limit", "maximum", "page"]
+  },
+  {
+    "id": "Q018",
+    "type": "deterministic",
+    "question": "How many times does NexusPay retry a failed webhook delivery?",
+    "expected_answer": "Up to 5 times with exponential backoff: 1min, 5min, 30min, 2h, 8h",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["webhook", "retry", "failed", "delivery"]
+  },
+  {
+    "id": "Q019",
+    "type": "deterministic",
+    "question": "What is the IP-level rate limit regardless of plan?",
+    "expected_answer": "5,000 requests per minute per IP address",
+    "source_file": "reference/rate_limits.md",
+    "fact_type": "rate_limit",
+    "keywords": ["ip", "limit", "requests", "minute"]
+  },
+  {
+    "id": "Q020",
+    "type": "deterministic",
+    "question": "How long do idempotency keys remain valid?",
+    "expected_answer": "24 hours",
+    "source_file": "guides/architecture_overview.md",
+    "fact_type": "constraint",
+    "keywords": ["idempotency", "key", "expiration", "hours"]
+  },
+  {
+    "id": "Q021",
+    "type": "deterministic",
+    "question": "What is the maximum description length for a payment?",
+    "expected_answer": "255 characters",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["description", "maximum", "characters", "payment"]
+  },
+  {
+    "id": "Q022",
+    "type": "deterministic",
+    "question": "How many concurrent connections does the Pro plan support?",
+    "expected_answer": "50 concurrent connections",
+    "source_file": "reference/rate_limits.md",
+    "fact_type": "rate_limit",
+    "keywords": ["pro", "concurrent", "connections"]
+  },
+  {
+    "id": "Q023",
+    "type": "deterministic",
+    "question": "What HTTP status code is returned when a resource is not found?",
+    "expected_answer": "HTTP 404",
+    "source_file": "reference/error_codes.md",
+    "fact_type": "error_code",
+    "keywords": ["not", "found", "404", "status"]
+  },
+  {
+    "id": "Q024",
+    "type": "deterministic",
+    "question": "What is the maximum URL length for a webhook endpoint?",
+    "expected_answer": "2048 characters",
+    "source_file": "reference/endpoints.md",
+    "fact_type": "constraint",
+    "keywords": ["webhook", "url", "maximum", "length"]
+  },
+  {
+    "id": "Q025",
+    "type": "deterministic",
+    "question": "What error code is returned when the capture window has expired?",
+    "expected_answer": "capture_window_expired",
+    "source_file": "reference/error_codes.md",
+    "fact_type": "error_code",
+    "keywords": ["capture", "window", "expired", "error"]
+  },
+  {
+    "id": "Q026",
+    "type": "semantic",
+    "question": "What is the difference between a secret key and a publishable key?",
+    "expected_answer": "Secret keys have full API access and must be stored server-side. Publishable keys are read-only and safe for frontend use — they can tokenize payment methods but cannot create payments directly.",
+    "source_file": "guides/authentication.md"
+  },
+  {
+    "id": "Q027",
+    "type": "semantic",
+    "question": "Why does NexusPay use cursor-based pagination instead of offset pagination?",
+    "expected_answer": "Offset pagination has a problem with real-time data: new items shift positions causing duplicates or skipped items. Cursor pagination avoids this by tracking exact position.",
+    "source_file": "guides/pagination_filtering.md"
+  },
+  {
+    "id": "Q028",
+    "type": "semantic",
+    "question": "How does the authorization and capture flow work?",
+    "expected_answer": "By default, POST /payments authorizes and captures in one step. Setting capture: false authorizes only, holding funds for up to 7 days. You then call POST /payments/:id/capture to complete.",
+    "source_file": "guides/architecture_overview.md"
+  },
+  {
+    "id": "Q029",
+    "type": "semantic",
+    "question": "Can I rely on webhooks as the primary confirmation of a payment?",
+    "expected_answer": "No. Webhook delivery is asynchronous and can be delayed up to 30 seconds. Always confirm payment status via the API directly.",
+    "source_file": "guides/architecture_overview.md"
+  },
+  {
+    "id": "Q030",
+    "type": "semantic",
+    "question": "How should I rotate API keys without downtime?",
+    "expected_answer": "Create the new key, deploy the application with it, then revoke the old key. Revoking is immediate and irreversible.",
+    "source_file": "guides/authentication.md"
+  },
+  {
+    "id": "Q031",
+    "type": "semantic",
+    "question": "What happens if I submit the same idempotency key twice with different parameters?",
+    "expected_answer": "The API returns HTTP 409 with error code idempotency_key_mismatch.",
+    "source_file": "guides/architecture_overview.md"
+  },
+  {
+    "id": "Q032",
+    "type": "semantic",
+    "question": "How do I paginate through all succeeded EUR payments from Q1 2025?",
+    "expected_answer": "Use GET /payments with filters status=succeeded, currency=EUR, from=2025-01-01, to=2025-03-31, limit=100. Use the next_cursor from each response as starting_after until has_more is false.",
+    "source_file": "guides/pagination_filtering.md"
+  },
+  {
+    "id": "Q033",
+    "type": "semantic",
+    "question": "What scopes are available for API keys on Pro and Enterprise plans?",
+    "expected_answer": "payments:read, payments:write, refunds:write, subscriptions, reports:read, webhooks. Scoped keys are not available on Free or Starter plans.",
+    "source_file": "guides/authentication.md"
+  },
+  {
+    "id": "Q034",
+    "type": "semantic",
+    "question": "How does NexusPay determine which environment a request goes to?",
+    "expected_answer": "By the API key prefix, not the URL. Keys starting with sk_test_ route to sandbox, sk_live_ to live — both use the same base URL.",
+    "source_file": "guides/architecture_overview.md"
+  },
+  {
+    "id": "Q035",
+    "type": "semantic",
+    "question": "What happens to active subscriptions if I delete a customer?",
+    "expected_answer": "Deleting a customer does not cancel their active subscriptions. You must cancel subscriptions explicitly before deleting the customer.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q036",
+    "type": "semantic",
+    "question": "What is the difference between cancel_at_period_end and immediate cancellation for subscriptions?",
+    "expected_answer": "Setting cancel_at_period_end: true cancels at the next billing date, allowing the customer to use the service until then. Immediate cancellation stops billing right away.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q037",
+    "type": "semantic",
+    "question": "How should I handle a card_declined error?",
+    "expected_answer": "card_declined means the issuer rejected the payment. The customer should try a different card or contact their bank. Do not retry the same card automatically as it may trigger fraud detection.",
+    "source_file": "reference/error_codes.md"
+  },
+  {
+    "id": "Q038",
+    "type": "semantic",
+    "question": "What security practices does NexusPay recommend for API keys?",
+    "expected_answer": "Use environment variables or a secrets manager, never commit to version control, use least-privilege scopes, rotate every 90 days in high-security environments, monitor for unexpected usage spikes.",
+    "source_file": "guides/authentication.md"
+  },
+  {
+    "id": "Q039",
+    "type": "semantic",
+    "question": "How does the webhook retry policy work?",
+    "expected_answer": "Failed deliveries are retried up to 5 times with exponential backoff: 1 minute, 5 minutes, 30 minutes, 2 hours, 8 hours.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q040",
+    "type": "semantic",
+    "question": "What webhook event is fired when a subscription billing fails?",
+    "expected_answer": "subscription.payment_failed",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q041",
+    "type": "semantic",
+    "question": "Where is NexusPay data stored by default?",
+    "expected_answer": "EU region, specifically Frankfurt, Germany. US data residency is available on Enterprise plans but cannot be changed after account creation.",
+    "source_file": "guides/architecture_overview.md"
+  },
+  {
+    "id": "Q042",
+    "type": "semantic",
+    "question": "How does proration work when upgrading a subscription?",
+    "expected_answer": "When calling POST /subscriptions/:id/upgrade, proration is calculated automatically by NexusPay.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q043",
+    "type": "semantic",
+    "question": "What authentication methods are supported for the NexusPay dashboard?",
+    "expected_answer": "Two-factor authentication is required for key management. Supported methods: TOTP (Google Authenticator, Authy) or hardware security keys (FIDO2/WebAuthn).",
+    "source_file": "guides/authentication.md"
+  },
+  {
+    "id": "Q044",
+    "type": "semantic",
+    "question": "How is amount represented in the API?",
+    "expected_answer": "Always in cents as an integer. For example, 1000 = €10.00. This avoids floating point precision issues.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q045",
+    "type": "semantic",
+    "question": "What does the X-RateLimit-Reset header contain?",
+    "expected_answer": "A Unix timestamp indicating when the current rate limit window resets.",
+    "source_file": "reference/rate_limits.md"
+  },
+  {
+    "id": "Q046",
+    "type": "semantic",
+    "question": "Can plain HTTP connections be used with the NexusPay API?",
+    "expected_answer": "No. Plain HTTP is rejected with a connection error, not an HTTP response. All requests must use HTTPS.",
+    "source_file": "guides/architecture_overview.md"
+  },
+  {
+    "id": "Q047",
+    "type": "semantic",
+    "question": "What happens to an authorized payment if I do not capture it within 7 days?",
+    "expected_answer": "The authorization expires automatically and the held funds are released. You cannot capture it after expiry — the error code returned is capture_window_expired.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q048",
+    "type": "semantic",
+    "question": "What filters can I use when listing subscriptions?",
+    "expected_answer": "customer_id, status (active, cancelled, past_due, trialing), and plan_id.",
+    "source_file": "guides/pagination_filtering.md"
+  },
+  {
+    "id": "Q049",
+    "type": "semantic",
+    "question": "What is the maximum date range for a report summary query?",
+    "expected_answer": "365 days. For longer ranges, use the Reports API.",
+    "source_file": "reference/endpoints.md"
+  },
+  {
+    "id": "Q050",
+    "type": "semantic",
+    "question": "What does the do_not_honor error mean and what should the customer do?",
+    "expected_answer": "do_not_honor is a generic decline from the card issuer. The customer should contact their bank directly — NexusPay cannot provide more specific information.",
+    "source_file": "reference/error_codes.md"
+  }
+]
