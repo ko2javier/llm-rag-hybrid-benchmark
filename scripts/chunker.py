@@ -1,9 +1,11 @@
 import os
 import json
 
-DOCS_DIR = r"D:\LLM_Testing\Prueba2\Rag_Fase2\docs"
-OUTPUT_FILE = r"D:\LLM_Testing\Prueba2\Rag_Fase2\output\chunks.json"
+DOCS_DIR = "docs"
+OUTPUT_FILE = "output/chunks.json"
 MIN_CHUNK_LEN = 50
+
+os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
 chunks = []
 chunk_id = 0

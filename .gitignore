@@ -5,3 +5,7 @@ __pycache__/
 *.log
 output/
 .claude/
+.hf_home/
+*.token
+**/token
+informe_*.md
