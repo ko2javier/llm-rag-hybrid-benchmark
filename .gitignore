@@ -9,3 +9,4 @@ output/
 *.token
 **/token
 informe_*.md
+!results/INFORME_FASE2_RESULTADOS.md
