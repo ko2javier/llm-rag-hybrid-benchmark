@@ -198,15 +198,15 @@ El hallazgo del router no integrado (§7) es importante para no sobre-interpreta
 
 ---
 
-## 10. Próximos pasos (no bloqueantes para el entregable de hoy)
+## 10. Próximos pasos (estado actualizado 01 ago 2026)
 
 Según el orden sugerido de `FASE2_LEY.md` §9:
 
-- **Exp D (router determinista)** — el más directo de ejecutar ahora: modificar `evaluator.py` para llamar a `router.classify()` antes de decidir RAG vs lookup en `api_facts`, y re-correr solo las 25 preguntas deterministas comparando contra los resultados de hoy.
-- **Exp B (HyDE)** — `hyde.py` ya existe y sigue el mismo patrón de CLI que `evaluator.py`; no ejecutado hoy por tiempo.
-- **Exp C (re-ranker)** — no bloqueante, mencionado en `FASE2_LEY.md` como mejora incremental.
-- Corregir el flujo de `evaluator.py`/`hyde.py` para poblar `equivalent_api_cost_usd` en el propio CSV (pasando `--api-input-cost-per-m`/`--api-output-cost-per-m` al invocarlo) en vez de recalcularlo post-hoc como se hizo aquí.
-- Considerar repetir el break-even modelando un patrón de tráfico realista (ráfagas + apagado entre picos) en vez de asumir GPU 24/7, para matizar la sección 8.2.
+- ~~**Exp D (router determinista)**~~ — **hecho, ver §12.**
+- ~~**Exp B (HyDE)**~~ — **hecho, ver §13.**
+- ~~Corregir el flujo de `evaluator.py`/`hyde.py` para poblar `equivalent_api_cost_usd` en el propio CSV~~ — **hecho**: los runs de §12/§13 pasan `--api-input-cost-per-m 1.40 --api-output-cost-per-m 4.40` (GLM-5.2) directamente al invocar, sin recálculo post-hoc.
+- **Exp C (re-ranker)** — sigue sin ejecutar, no bloqueante, mencionado en `FASE2_LEY.md` como mejora incremental. Decisión explícita de dejarlo fuera de esta ronda: no ataca ninguna debilidad identificada en los datos (a diferencia de D y B, que sí respondían a hallazgos concretos de §6.3/§7).
+- Considerar repetir el break-even modelando un patrón de tráfico realista (ráfagas + apagado entre picos) en vez de asumir GPU 24/7, para matizar la sección 8.2. Sigue pendiente.
 
 ---
 
@@ -225,8 +225,94 @@ Según el orden sugerido de `FASE2_LEY.md` §9:
 └── INFORME_FASE2_RESULTADOS.md           (este documento)
 ```
 
-Base de datos `nexuspay_rag`: 572 chunks con embedding (pgvector HNSW), 32 filas en `api_facts` (schema listo para Exp D, sin usar todavía en la evaluación).
+Base de datos `nexuspay_rag`: 572 chunks con embedding (pgvector HNSW), 32 filas en `api_facts` (usadas por Exp D, ver §12).
 
 ---
 
-*Informe generado a partir de datos reales de ejecución en esta instancia Vast.ai (31 julio 2026). Todas las cifras de coste, latencia y RAGAS provienen de los CSV listados en la sección 11, no son estimaciones.*
+## 12. Exp D — Router determinista integrado (01 ago 2026)
+
+**Instancia:** nueva instancia Vast.ai, misma GPU de referencia (RTX 6000 Ada 48GB), coste real **$0.7493/h** (€0.65/h al tipo de cambio del día). Los 572 chunks, `api_facts` y el dataset se regeneraron desde cero (misma metodología, ver §4).
+
+**Cambio de código:** `evaluator.py` gana `--use-router` — antes de decidir el prompt, llama a `router.classify(question)`; si el tipo es `deterministic`, busca en `api_facts` (Postgres) la fila del `fact_type` con mayor solape de keywords contra la pregunta, y usa ese hecho exacto como contexto en vez de retrieval semántico. Si no hay match, cae a RAG semántico normal (columna `retrieval_method` deja constancia de cuál se usó fila por fila).
+
+**Bug encontrado y corregido antes de ejecutar (validado offline, sin gastar GPU):** `router.py` tenía 2 fallos reales que `test_router.py` no detectaba porque solo compara `fact_type`, no las `keywords` exactas — (1) `normalize()` convertía "IP-level" en `"iplevel"` (perdía el guión), rompiendo la regla que busca el token `"ip"`; (2) el `subject_map` de la regla de `constraint` solo tenía una entrada para `"refund"`, así que la pregunta sobre la ventana de días para crear un refund resolvía al hecho equivocado (el de "máximo de refunds por pago"). Ambos corregidos en `router.py`; re-validado 25/25 correcto contra el seed de `api_facts` antes de correr nada en la instancia.
+
+**Corrido con las 25 preguntas deterministas únicamente** (las semánticas no las toca el router, no tenía sentido repetirlas):
+
+| Modelo | Retrieval method | Latencia media | Coste medio/query |
+|---|---|---|---|
+| Gemma 3 27B | 25/25 `router_lookup` | **0.20s** | **$0.000042** |
+| Gemma 4 31B | 25/25 `router_lookup` | 0.33s | $0.000068 |
+| Qwen 32B | 25/25 `router_lookup` | 0.43s | $0.000090 |
+
+Los 25/25 resolvieron a un hecho vía lookup en los 3 modelos (0 fallback a RAG semántico) — confirma que el router + el arreglo de keywords cubren el 100% del subconjunto determinista. Latencia y coste caen entre 5x y 6x frente al baseline semántico de §6.1 (~1.3s), porque se salta el embedding de la pregunta y la búsqueda de similitud.
+
+**Calidad (RAGAS) — deterministas, router vs baseline semántico (§6.3):**
+
+| Métrica | Gemma 3 27B (router → base) | Gemma 4 31B (router → base) | Qwen 32B (router → base) |
+|---|---|---|---|
+| Faithfulness | 0.960 → 0.853 (**+0.107**) | 0.820 → 0.940 (**-0.120**) | 0.852 → 0.927 (**-0.075**) |
+| Answer relevancy | 0.472 → 0.874 (**-0.402**) | 0.531 → 0.960 (**-0.429**) | 0.845 → 0.932 (**-0.087**) |
+| Context precision | 1.000 → 0.944 (**+0.056**) | 1.000 → 0.944 (**+0.056**) | 1.000 → 0.961 (**+0.039**) |
+| Context recall | 1.000 → 0.993 (**+0.007**) | 1.000 → 0.990 (**+0.010**) | 1.000 → 0.968 (**+0.032**) |
+
+**Lectura — la hipótesis de §7 se confirma solo a medias:**
+
+- **Context precision y context recall saturan a 1.000 en los tres modelos**, exactamente como anticipaba §7: el lookup exacto en `api_facts` elimina por diseño cualquier error de retrieval en preguntas deterministas.
+- **Faithfulness y answer_relevancy NO mejoran de forma uniforme — de hecho empeoran en 2 de 3 modelos.** Esto no estaba anticipado y tiene dos causas distintas, verificadas leyendo las respuestas fila por fila:
+  1. **Answer relevancy cae fuerte en los tres modelos** porque las respuestas basadas en el hecho exacto son muy cortas y telegráficas ("1000", "10", "v2") en vez de la frase completa que generaba el RAG semántico con contexto narrativo. RAGAS mide relevancy generando preguntas sintéticas a partir de la respuesta y comparándolas contra la pregunta original — una respuesta de una palabra da mucho menos señal a esa métrica, aunque sea correcta. Es un artefacto de formato, no un error de contenido.
+  2. **Faithfulness cae en Gemma 4 31B (-0.12) y Qwen 32B (-0.075)** por una causa real, no un artefacto: en varias preguntas (Q007, Q009, Q014, Q018, Q021, Q022, Q024 en Gemma 4; Q007 y Q024 en Qwen) el modelo respondió *"the provided text does not contain information regarding..."* **a pesar de que el hecho exacto estaba en el contexto**, en formato JSON compacto en vez de prosa. Gemma 3 27B no tuvo este problema (25/25 correctas). Esto sugiere que el prompt usado para el contexto de lookup (`build_fact_prompt`, JSON crudo) es menos robusto para Gemma 4/Qwen que el prompt narrativo del RAG semántico — un hallazgo de ingeniería de prompts, no del router en sí.
+
+**Conclusión de Exp D:** el router cumple su promesa en las métricas de retrieval (precision/recall a 1.0), pero expone que el *prompt* usado para presentar el hecho exacto necesita trabajo — no basta con inyectar el JSON tal cual, especialmente para modelos que no son Gemma 3. Sería el primer punto a mejorar si se retoma esta línea (ver §10).
+
+---
+
+## 13. Exp B — HyDE sobre preguntas semánticas (01 ago 2026)
+
+**Corrido con las 25 preguntas semánticas únicamente** (HyDE no aporta nada en preguntas deterministas ya cubiertas por el router — no tenía sentido correrlo ahí). Mismo modelo genera la respuesta hipotética y la respuesta final (sin doble modelo, según diseño ya documentado en §4.2 del código).
+
+**Coste y latencia — HyDE añade una llamada extra al LLM (genera la hipótesis) antes de recuperar contexto:**
+
+| Modelo | Latencia total media (HyDE + respuesta) | Coste medio/query |
+|---|---|---|
+| Gemma 4 31B | **3.05s** | **$0.000635** |
+| Qwen 32B | 3.27s | $0.000681 |
+| Gemma 3 27B | 3.82s | $0.000796 |
+
+Frente al baseline semántico de §6.1 (~1.0-1.4s), HyDE cuesta entre 2.2x y 3x más por query — coherente con que ejecuta dos pasadas de generación en vez de una.
+
+**Calidad (RAGAS) — semánticas, HyDE vs baseline semántico (§6.3):**
+
+| Métrica | Gemma 3 27B (HyDE → base) | Gemma 4 31B (HyDE → base) | Qwen 32B (HyDE → base) |
+|---|---|---|---|
+| Faithfulness | 0.910 → 0.895 (+0.015) | 0.934 → 0.833 (**+0.101**) | 0.955 → 0.946 (+0.009) |
+| Answer relevancy | 0.836 → 0.837 (≈0) | 0.851 → 0.798 (+0.053) | 0.813 → 0.740 (**+0.073**) |
+| Context precision | 0.957 → 0.959 (≈0) | 0.970 → 0.978 (-0.008) | 0.985 → 0.976 (+0.009) |
+| Context recall | 0.885 → 0.855 (+0.030) | **0.924 → 0.797 (+0.127)** | 0.863 → 0.798 (+0.065) |
+
+**Lectura — la hipótesis de §6.3/§9 se confirma con más fuerza de la esperada:**
+
+- **`context_recall` sube en los tres modelos**, tal como predecía el patrón identificado en el informe original (RAG semántico puro le cuesta sintetizar contexto disperso entre varios documentos; HyDE ataca justo ese problema generando una respuesta hipotética más rica que la pregunta original antes de buscar).
+- **El modelo que más se beneficia es exactamente el que peor estaba: Gemma 4 31B**, que en el baseline tenía la faithfulness semántica más baja de los tres (0.833, señalado en §6.3 como su punto débil). Con HyDE, sube a 0.934 — la mejora más grande de faithfulness de los tres modelos (+0.101) y de recall (+0.127). HyDE no solo confirma la hipótesis, corrige específicamente la debilidad que el informe original había detectado en este modelo.
+- Qwen 32B y Gemma 3 27B, que ya partían de una faithfulness semántica decente (0.946 y 0.895), mejoran menos en términos absolutos — hay menos margen de mejora.
+- `context_precision` se mantiene prácticamente plano en los tres — HyDE mejora qué tan completo es el contexto recuperado (recall), no cuánto ruido trae (precision).
+
+**Conclusión de Exp B:** HyDE cumple su hipótesis de forma limpia y sin la complicación de formato que apareció en Exp D — mejora consistentemente el punto débil identificado (recall en preguntas semánticas), y de forma más marcada en el modelo que más lo necesitaba. Al coste de ~2.5x más tiempo/GPU por query, es una mejora justificable si las preguntas semánticas/narrativas son una fracción significativa del tráfico esperado en producción.
+
+---
+
+## 14. Archivos generados — actualización 01 ago 2026
+
+```
+results/
+├── gemma3_27b_router.csv / _router_ragas.csv
+├── gemma3_27b_hyde.csv / _hyde_ragas.csv
+├── gemma4_31b_router.csv / _router_ragas.csv
+├── gemma4_31b_hyde.csv / _hyde_ragas.csv
+├── qwen32b_router.csv / _router_ragas.csv
+└── qwen32b_hyde.csv / _hyde_ragas.csv
+```
+
+---
+
+*Informe generado a partir de datos reales de ejecución en Vast.ai (31 julio 2026, §1-11; 01 agosto 2026, §12-14). Todas las cifras de coste, latencia y RAGAS provienen de los CSV listados, no son estimaciones.*

@@ -25,13 +25,13 @@ Synthetic documentation for a fictional payment API (NexusPay):
 | Experiment | What it tests | Status |
 |---|---|---|
 | A | Self-hosted RAG (bge-m3, semantic retrieval) across 3 candidate LLMs — quality (RAGAS) + real GPU cost/query | ✅ Done (31 Jul 2026) — see [`results/`](results/INFORME_FASE2_RESULTADOS.md) |
-| B | HyDE vs standard retrieval — cost vs quality tradeoff | Script ready (`hyde.py`), not run yet |
-| C | bge-reranker-v2-m3 vs ms-marco vs no re-ranker | Not started |
-| D | Deterministic router vs RAG-only on exact fact questions | Router validated standalone (25/25) — not yet wired into the evaluation pipeline |
+| B | HyDE vs standard retrieval, semantic questions only — cost vs quality tradeoff | ✅ Done (01 Aug 2026) — see §13 of the report |
+| C | bge-reranker-v2-m3 vs ms-marco vs no re-ranker | Not started — deprioritized, doesn't target a weakness the data actually showed |
+| D | Deterministic router + `api_facts` lookup vs RAG-only, deterministic questions only | ✅ Done (01 Aug 2026) — see §12 of the report |
 
 ## Results (Exp A — self-hosted cost & quality, 31 Jul 2026)
 
-Full report with methodology, incidents, and per-question-type breakdown: [`results/INFORME_FASE2_RESULTADOS.md`](results/INFORME_FASE2_RESULTADOS.md). Raw CSVs (latency/cost + RAGAS scores per model) in [`results/`](results/).
+Full report with methodology, incidents, and per-question-type breakdown: [`results/REPORT_FASE2_RESULTS.md`](results/REPORT_FASE2_RESULTS.md) (English) / [`results/INFORME_FASE2_RESULTADOS.md`](results/INFORME_FASE2_RESULTADOS.md) (Spanish original). Raw CSVs (latency/cost + RAGAS scores per model) in [`results/`](results/).
 
 **Setup:** 1× RTX 6000 Ada (48GB) on Vast.ai, $0.6966/h real instance price, vLLM + AWQ quantization, RAGAS-judged by Mistral 7B Instruct (third model family, to avoid self-preference bias).
 
@@ -44,18 +44,21 @@ Full report with methodology, incidents, and per-question-type breakdown: [`resu
 **Headline findings:**
 - **No single winner.** Gemma 4 31B is fastest/cheapest and best on deterministic questions, but its faithfulness drops the most on semantic (narrative) questions. Qwen 32B is the most balanced but slowest/most expensive. The right pick depends on the real production question mix.
 - **Self-hosting doesn't pay off at demo volume.** Break-even vs the reference APIs (GLM-5.2, Kimi K3) sits between ~250K and ~2.2M queries/month assuming a GPU running 24/7 — far above portfolio/demo traffic. The value of this exercise is the deployment/measurement rigor, not immediate savings (see report §8 for the nuance on burst/spot pricing changing this math).
-- **The deterministic router is not yet wired into the eval pipeline** — all 50 questions (including the 25 deterministic ones) went through pure semantic RAG. `router.py` passes 25/25 standalone, but Exp D (router integrated) is still open — see Next steps.
+
+## Results (Exp D — router-backed lookup, Exp B — HyDE, 01 Aug 2026)
+
+Full breakdown in [`results/REPORT_FASE2_RESULTS.md`](results/REPORT_FASE2_RESULTS.md) §12-13 (English) / [`results/INFORME_FASE2_RESULTADOS.md`](results/INFORME_FASE2_RESULTADOS.md) §12-13 (Spanish). Two bugs were found and fixed *before* spending any GPU time on this, by validating `router.classify()` offline against the golden dataset: `normalize()` was dropping "IP-level" down to `"iplevel"` (losing the `"ip"` token), and the `constraint` rule's keyword map collapsed two different refund questions onto the same fact. Both fixed, re-validated 25/25 offline, then run for real.
+
+**Exp D (router + `api_facts` lookup, deterministic questions only):** all 25/25 questions resolved via exact lookup in all three models, at ~5-6x lower latency/cost than semantic RAG. `context_precision`/`context_recall` hit **1.000** in all three models, confirming the hypothesis from Exp A. But faithfulness/answer_relevancy did **not** improve uniformly — they dropped in 2 of 3 models. Two distinct causes, verified row by row: (1) answer_relevancy drops everywhere because exact-fact answers are short ("1000", "v2") and RAGAS's relevancy metric penalizes terse answers regardless of correctness; (2) faithfulness genuinely drops for Gemma 4 31B (-0.12) and Qwen 32B (-0.075) because those models sometimes respond "the provided text does not contain..." even though the fact is right there in the prompt, in compact JSON instead of prose — Gemma 3 27B didn't have this problem (25/25 correct). The router's retrieval-side promise holds; the fact-lookup prompt template needs work for non-Gemma-3 models.
+
+**Exp B (HyDE, semantic questions only):** confirms the hypothesis cleanly — `context_recall` improves in all three models, and the model that gains the most is exactly the one that needed it most: Gemma 4 31B, which had the worst semantic faithfulness in Exp A (0.833), jumps to 0.934 (+0.101) and recall +0.127. Costs ~2.5-3x more latency/query than plain semantic RAG (two LLM calls instead of one) — a reasonable trade if semantic/narrative questions are a meaningful share of expected production traffic.
 
 ## Next steps
 
-From the report's own recommendations, plus a few additions:
-
-- **Exp D (router integration)** — the most direct next step: wire `router.classify()` into `evaluator.py` so deterministic questions hit `api_facts` lookup instead of semantic RAG, then re-score just that subset against today's baseline.
-- **Exp B (HyDE)** and **Exp C (re-ranking)** — scripts exist, not run yet.
-- **Quality-per-dollar view** — today's report treats cost and RAGAS quality as separate tables; worth combining into a single score (e.g. faithfulness / cost-per-query) to make the "which model is actually the best value" call explicit instead of implicit.
+- **Fix the Exp D fact-lookup prompt** — `build_fact_prompt()` currently injects the `api_facts` value as raw JSON; try a templated sentence instead ("The {plan} plan allows {limit} requests per {window}.") to see if that closes the faithfulness gap on Gemma 4/Qwen without losing the precision/recall win.
+- **Exp C (re-ranking)** — script exists, still not run. Deprioritized twice now — only pick it up if a future data point actually motivates it.
+- **Quality-per-dollar view** — combine cost and RAGAS quality into one score (e.g. faithfulness / cost-per-query) instead of two separate tables, across all of Exp A/B/D.
 - **Model the break-even under realistic traffic** (bursty + scale-to-zero / spot pricing) instead of GPU-24/7 — the report flags this as the biggest unmeasured nuance in the cost conclusion (§8.2).
-- **Pin the dependency versions that were debugged into working** (`ragas==0.4.3` + the `langchain-community` compatibility patch, `tiktoken_enabled=False` on `OpenAIEmbeddings`) directly in `requirements.txt`, so the next run doesn't rediscover the same two bugs.
-- Populate `equivalent_api_cost_usd` directly from `evaluator.py`/`hyde.py` CLI flags instead of computing it post-hoc, as noted in the report.
 
 ## Repository structure
 docs/reference/    # Rate limits, endpoints, error codes

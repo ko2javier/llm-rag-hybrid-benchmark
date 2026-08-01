@@ -139,6 +139,13 @@ python3 scripts/ingest.py
 # Verificar
 sudo -u postgres psql -d nexuspay_rag \
   -c "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL;"
+
+# Cargar schema + seed de api_facts (necesario para el router determinista — Exp D)
+python3 scripts/ingest_facts.py --file sql/setup_api_facts.sql
+
+# Verificar
+sudo -u postgres psql -d nexuspay_rag -c "SELECT COUNT(*) FROM api_facts;"
+# Esperado: 32
 ```
 
 ---
@@ -187,28 +194,29 @@ curl -s http://localhost:8081/v1/models | python3 -m json.tool
 
 ## Paso 9 — Ejecutar evaluación
 
-Verificar configuración en `scripts/evaluator.py` antes de correr:
-
-```python
-MODEL_URL       = "http://localhost:8081/v1"
-MODEL_NAME      = "google/gemma-3-12b-it"   # debe coincidir con el modelo arrancado
-EMBEDDING_URL   = "http://localhost:8083/embed"
-EMBEDDING_MODEL = "BAAI/bge-m3"
-OUTPUT_FILE     = "output/eval_results.csv"
-```
+`evaluator.py` y `hyde.py` aceptan el modelo, el CSV de salida y el precio de GPU por CLI —
+no hace falta editar el script para cambiar de modelo.
 
 ```bash
 cd /workspace/Rag_Fase2
 
-# Evaluación estándar (RAG cosine similarity → CSV)
-python3 scripts/evaluator.py
-# Output: output/eval_results.csv
+# Evaluación estándar (RAG cosine similarity → CSV con coste)
+python3 scripts/evaluator.py \
+  --model google/gemma-3-12b-it \
+  --output results/gemma-3-12b_selfhosted.csv \
+  --gpu-hourly-rate 0.35
+# Columnas de coste incluidas: cost_per_query_usd, gpu_hourly_rate_usd, equivalent_api_cost_usd
+# --api-input-cost-per-m / --api-output-cost-per-m opcionales para poblar equivalent_api_cost_usd
+# contra un modelo API de referencia (Kimi K3, GLM-5.2, etc. — ver FASE2_LEY.md sección 7)
 
-# Evaluación HyDE (opcional)
-python3 scripts/hyde.py
-# Output: output/hyde_results.json
+# Evaluación HyDE (opcional — mismo modelo genera hipótesis y respuesta final)
+python3 scripts/hyde.py \
+  --model google/gemma-3-12b-it \
+  --output results/gemma-3-12b_hyde.csv \
+  --gpu-hourly-rate 0.35
+# Output: results/gemma-3-12b_hyde.csv
 
-# Test del router (solo queries deterministas)
+# Test del router (solo queries deterministas, offline — no consulta api_facts)
 python3 scripts/test_router.py
 # Output: output/router_test_results.json
 ```
@@ -218,19 +226,80 @@ python3 scripts/test_router.py
 ## Paso 10 — Cambio de modelo (limpieza entre runs)
 
 ```bash
-# Matar vLLM
-kill $(pgrep -f "vllm.entrypoints") 2>/dev/null
+# Matar vLLM — usar pkill/kill por PID directo, no un pipeline con awk/xargs
+# (esa combinación falló de forma intermitente en la práctica; matar por PID exacto
+# obtenido con pgrep -af es más fiable)
+pkill -9 -f "vllm.entrypoints"
 sleep 6
-ps aux | grep -E "vllm|EngineCore" | grep -v grep | awk '{print $2}' | xargs -r kill -9
+pkill -9 -f "EngineCore"
+sleep 5
+pgrep -af "vllm|EngineCore"   # debe salir vacío
 
 # Verificar VRAM liberada (deben quedar solo ~3.1 GB del embed server)
 nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader
-sleep 10
+
+# CRÍTICO — borrar el cache del modelo anterior en /dev/shm ANTES de cargar el siguiente.
+# /dev/shm son 31GB en total; un modelo ~30B en AWQ pesa ~15-20GB, así que dos modelos
+# cacheados a la vez llenan el tmpfs y el siguiente `hf download`/vLLM falla con
+# "OSError: No space left on device" a mitad de la descarga.
+rm -rf /dev/shm/hf_cache/hub
+df -h /dev/shm   # confirmar que vuelve a ~31G libres
 
 # Arrancar siguiente modelo — volver al Paso 8
 ```
 
-> El embed server NO se reinicia entre modelos. Permanece activo toda la sesión.
+> El embed server NO se reinicia entre modelos. Permanece activo toda la sesión — su cache
+> vive en `/workspace/hf_cache` (disco raíz), NO en `/dev/shm`, así que no se ve afectado
+> por el `rm -rf` de arriba.
+
+---
+
+## Paso 11 — Scoring RAGAS (juez de tercera familia)
+
+```bash
+# Parche obligatorio tras cada pip install fresco: ragas==0.4.3 importa
+# ChatVertexAI/VertexAI desde un submódulo que langchain-community ya no tiene
+# (movido a paquete aparte en su sunset). Import top-level, no perezoso — rompe
+# ragas_eval.py antes de ejecutar una fila. Solo se usa en un isinstance()
+# irrelevante si el juez es ChatOpenAI (nuestro caso), así que un try/except
+# con clases dummy es seguro.
+python3 - <<'PYEOF'
+path = "/venv/main/lib/python3.12/site-packages/ragas/llms/base.py"
+old = "from langchain_community.chat_models.vertexai import ChatVertexAI\nfrom langchain_community.llms import VertexAI\n"
+new = (
+    "try:\n"
+    "    from langchain_community.chat_models.vertexai import ChatVertexAI\n"
+    "    from langchain_community.llms import VertexAI\n"
+    "except ImportError:\n"
+    "    class ChatVertexAI:\n        pass\n"
+    "    class VertexAI:\n        pass\n"
+)
+content = open(path, encoding="utf-8").read()
+assert old in content, "import block not found — ragas version may have changed"
+open(path, "w", encoding="utf-8").write(content.replace(old, new))
+print("patched")
+PYEOF
+
+# Cargar el juez (tercera familia, ni Gemma ni Qwen) — volver al Paso 8 con este modelo.
+# meta-llama/Llama-3.1-8B-Instruct esta gateado (requiere aceptar licencia manual en HF);
+# mistralai/Mistral-7B-Instruct-v0.3 es la alternativa ungated usada en la práctica.
+python3 -m vllm.entrypoints.openai.api_server \
+  --model mistralai/Mistral-7B-Instruct-v0.3 \
+  --dtype bfloat16 --gpu-memory-utilization 0.85 \
+  --max-model-len 4096 --max-num-seqs 64 \
+  --host 0.0.0.0 --port 8081 --trust-remote-code --hf-token $HF_TOKEN &
+
+# Por cada CSV de evaluator.py/hyde.py ya generado:
+python3 scripts/ragas_eval.py \
+  --input results/<modelo>_selfhosted.csv \
+  --output results/<modelo>_ragas.csv \
+  --judge-model mistralai/Mistral-7B-Instruct-v0.3
+```
+
+> `ragas_eval.py` ya instancia `OpenAIEmbeddings(..., tiktoken_enabled=False)` —
+> sin ese flag, `langchain_openai` pre-tokeniza el input a IDs enteros vía `tiktoken`
+> (mimetizando la API de OpenAI real) y `embed_server_batching.py` lo rechaza con 422
+> porque solo acepta `str`/`list[str]`. No hace falta tocar nada si se usa este script tal cual.
 
 ---
 
@@ -255,6 +324,7 @@ sleep 10
 6. python3 scripts/embed_server_batching.py  ← SIEMPRE PRIMERO
 7. python3 scripts/chunker.py
 8. python3 scripts/ingest.py
-9. python3 -m vllm.entrypoints.openai.api_server ...  ← DESPUÉS del embed
-10. python3 scripts/evaluator.py
+9. python3 scripts/ingest_facts.py --file sql/setup_api_facts.sql
+10. python3 -m vllm.entrypoints.openai.api_server ...  ← DESPUÉS del embed
+11. python3 scripts/evaluator.py --model <MODEL_ID> --output results/<modelo>.csv
 ```

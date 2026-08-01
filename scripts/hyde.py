@@ -1,18 +1,23 @@
 """
-HyDE (Hypothetical Document Embeddings) evaluation benchmark.
+HyDE (Hypothetical Document Embeddings) evaluation benchmark — single model.
 
 Differs from evaluator.py in retrieval:
   Standard:  embed(question)       → cosine similarity → top-k chunks
   HyDE:      LLM(question) → hypothetical answer → embed(hyp_answer)
              → cosine similarity → top-k chunks → LLM(final answer)
 
-The hypothetical answer is generated once (by Gemma) and reused for both
-Gemma and Qwen final-answer retrieval.
+Uses ONE model for both steps (hypothetical answer + final answer) — this
+phase runs one self-hosted model at a time on a single ~20GB GPU, so no
+second model is assumed to be running concurrently. No cross-judging here;
+quality evaluation is handled separately (RAGAS), not by LLM-as-judge.
 
 Run from the project root:
-    python scripts/hyde.py
+    python scripts/hyde.py --model Qwen/Qwen2.5-32B-Instruct-AWQ \
+        --output results/qwen_hyde.csv --gpu-hourly-rate 0.35
 """
 
+import argparse
+import csv
 import json
 import os
 import time
@@ -20,22 +25,24 @@ import time
 import numpy as np
 import requests
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration (defaults, overridable via CLI) ────────────────────────────
 
-GEMMA_URL   = "http://localhost:8081/v1"
-GEMMA_MODEL = "google/gemma-3-27b-it"
+MODEL_URL   = "http://localhost:8081/v1"
+MODEL_NAME  = "google/gemma-3-27b-it"
 
-QWEN_URL    = "http://localhost:8082/v1"
-QWEN_MODEL  = "Qwen/Qwen2.5-32B-Instruct-AWQ"
+EMBEDDING_URL   = "http://localhost:8083/embed"  # TEI endpoint
+EMBEDDING_MODEL = "BAAI/bge-m3"
 
 CHUNKS_FILE    = "output/chunks.json"
 GOLDEN_DATASET = "dataset/golden_dataset.json"
-OUTPUT_DIR     = "output/"
+OUTPUT_FILE    = "output/hyde_results.csv"
 
-TOP_K         = 5
-EMBEDDING_URL = "http://localhost:8083/embed"  # TEI endpoint
+TOP_K        = 5
+HTTP_TIMEOUT = 60  # seconds
 
-HTTP_TIMEOUT  = 60  # seconds
+GPU_HOURLY_RATE_USD    = 0.35
+API_INPUT_COST_PER_M   = 0.0
+API_OUTPUT_COST_PER_M  = 0.0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -65,7 +72,7 @@ def embed(text: str) -> np.ndarray | None:
         return None
 
 
-def retrieve(query_vec: np.ndarray, chunk_vecs: list[np.ndarray | None],
+def retrieve(query_vec: np.ndarray, chunk_vecs: list,
              chunks: list[dict]) -> list[dict]:
     """Return TOP_K chunks sorted by cosine similarity (descending)."""
     scored = []
@@ -101,13 +108,14 @@ def build_rag_prompt(question: str, retrieved: list[dict]) -> str:
     )
 
 
-def chat_completion(base_url: str, model: str, prompt: str) -> tuple[str, float]:
+def chat_completion(model_url: str, model_name: str, prompt: str) -> tuple[str, float, int, int]:
     """
     Call /v1/chat/completions.
-    Returns (response_text, latency_ms). On error returns ("", elapsed_ms).
+    Returns (response_text, latency_s, prompt_tokens, completion_tokens).
+    On error returns ("", elapsed_s, 0, 0).
     """
     payload = {
-        "model":       model,
+        "model":       model_name,
         "messages":    [{"role": "user", "content": prompt}],
         "temperature": 0.0,
         "max_tokens":  512,
@@ -115,57 +123,45 @@ def chat_completion(base_url: str, model: str, prompt: str) -> tuple[str, float]
     t0 = time.monotonic()
     try:
         resp = requests.post(
-            f"{base_url}/chat/completions",
+            f"{model_url}/chat/completions",
             json=payload,
             timeout=HTTP_TIMEOUT,
         )
-        elapsed = (time.monotonic() - t0) * 1000
+        elapsed = time.monotonic() - t0
         resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"].strip()
-        return text, round(elapsed, 1)
+        body = resp.json()
+        text = body["choices"][0]["message"]["content"].strip()
+        usage = body.get("usage", {})
+        return text, round(elapsed, 3), usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
     except Exception as exc:
-        elapsed = (time.monotonic() - t0) * 1000
-        print(f"  [chat error {base_url}] {exc}")
-        return "", round(elapsed, 1)
+        elapsed = time.monotonic() - t0
+        print(f"  [chat error] {exc}")
+        return "", round(elapsed, 3), 0, 0
 
 
-def generate_hypothetical_answer(question: str) -> tuple[str, float]:
-    """
-    Ask Gemma to produce a short hypothetical answer to the question.
-    Returns (hypothetical_text, latency_ms).
-    """
+def generate_hypothetical_answer(model_url: str, model_name: str, question: str) -> tuple[str, float, int, int]:
+    """Ask the model to produce a short hypothetical answer to the question."""
     prompt = (
         "Generate a short hypothetical answer to this question as if you were "
         "a technical documentation expert. Be concise, 2-3 sentences maximum.\n"
         f"Question: {question}"
     )
-    return chat_completion(GEMMA_URL, GEMMA_MODEL, prompt)
+    return chat_completion(model_url, model_name, prompt)
 
 
-def judge_answer(judge_url: str, judge_model: str,
-                 question: str, expected: str, response: str) -> int:
-    """
-    Ask the judge model to score 'response' 0-10.
-    Returns an int, or 0 on failure.
-    """
-    prompt = (
-        "Score this answer from 0 to 10 based on correctness and completeness.\n"
-        f"Question: {question}\n"
-        f"Expected answer: {expected}\n"
-        f"Given answer: {response}\n"
-        "Reply with only a number from 0 to 10."
+def compute_costs(latency_s: float, prompt_tokens: int, completion_tokens: int,
+                   gpu_hourly_rate: float, api_input_cost_per_m: float,
+                   api_output_cost_per_m: float) -> tuple[float, float]:
+    cost_per_query_usd = round((latency_s / 3600.0) * gpu_hourly_rate, 8)
+    equivalent_api_cost_usd = round(
+        (prompt_tokens * api_input_cost_per_m / 1_000_000)
+        + (completion_tokens * api_output_cost_per_m / 1_000_000),
+        8,
     )
-    text, _ = chat_completion(judge_url, judge_model, prompt)
-    for token in text.split():
-        token = token.strip(".,")
-        if token.isdigit():
-            return min(10, max(0, int(token)))
-    return 0
+    return cost_per_query_usd, equivalent_api_cost_usd
 
 
-# ── Chunk pre-embedding ───────────────────────────────────────────────────────
-
-def embed_all_chunks(chunks: list[dict]) -> list[np.ndarray | None]:
+def embed_all_chunks(chunks: list[dict]) -> list:
     print(f"Embedding {len(chunks)} chunks via TEI …")
     vecs = []
     for i, chunk in enumerate(chunks):
@@ -177,139 +173,109 @@ def embed_all_chunks(chunks: list[dict]) -> list[np.ndarray | None]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="HyDE evaluator (single model) con coste")
+    parser.add_argument("--model", default=MODEL_NAME, help="Nombre/ID del modelo servido por vLLM")
+    parser.add_argument("--model-url", default=MODEL_URL, help="Base URL OpenAI-compatible de vLLM")
+    parser.add_argument("--output", default=OUTPUT_FILE, help="Ruta del CSV de salida")
+    parser.add_argument("--gpu-hourly-rate", type=float, default=GPU_HOURLY_RATE_USD)
+    parser.add_argument("--api-input-cost-per-m", type=float, default=API_INPUT_COST_PER_M)
+    parser.add_argument("--api-output-cost-per-m", type=float, default=API_OUTPUT_COST_PER_M)
+    parser.add_argument("--only-type", choices=["all", "deterministic", "semantic"], default="all",
+                         help="Filtra el dataset a un solo tipo de pregunta antes de correr "
+                              "(para re-correr solo un subconjunto sin gastar GPU en el resto).")
+    return parser.parse_args()
+
+
 def main():
-    # ── Load data ─────────────────────────────────────────────────────────────
+    args = parse_args()
+
     print("Loading data …")
     chunks  = load_json(CHUNKS_FILE)
     dataset = load_json(GOLDEN_DATASET)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    if args.only_type != "all":
+        dataset = [item for item in dataset if item.get("type") == args.only_type]
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
-    # ── Pre-embed chunks ──────────────────────────────────────────────────────
     chunk_vecs = embed_all_chunks(chunks)
 
-    # ── Per-question HyDE pipeline ────────────────────────────────────────────
-    results = []
-    total   = len(dataset)
-    print(f"\nRunning HyDE pipeline on {total} questions …\n")
+    total = len(dataset)
+    print(f"\nRunning HyDE pipeline on {total} questions with model={args.model} …\n")
 
-    for idx, item in enumerate(dataset, 1):
-        qid      = item["id"]
-        question = item["question"]
-        expected = item.get("expected_answer", "")
-        qtype    = item.get("type", "unknown")
+    CSV_COLUMNS = [
+        "id", "type", "source", "question", "ideal_answer",
+        "hypothetical_answer", "generated_answer", "retrieved_context",
+        "hyde_latency_s", "answer_latency_s", "total_latency_s",
+        "prompt_tokens", "completion_tokens", "tokens_used",
+        "embedding_model", "llm_model",
+        "cost_per_query_usd", "gpu_hourly_rate_usd", "equivalent_api_cost_usd",
+    ]
 
-        print(f"[{idx}/{total}] {qid}: {question[:80]}")
+    with open(args.output, "w", encoding="utf-8", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
 
-        t_total_start = time.monotonic()
+        for idx, item in enumerate(dataset, 1):
+            qid      = item["id"]
+            question = item["question"]
+            expected = item.get("expected_answer", "")
+            qtype    = item.get("type", "unknown")
 
-        # Step 1: Gemma generates a hypothetical answer
-        hyp_answer, hyde_latency = generate_hypothetical_answer(question)
-        print(f"  HyDE   {hyde_latency:.0f}ms — {hyp_answer[:70]!r}")
+            print(f"[{idx}/{total}] {qid}: {question[:80]}")
 
-        # Step 2: Embed the hypothetical answer (not the question)
-        if hyp_answer:
-            hyp_vec = embed(hyp_answer)
-        else:
-            # Fallback to embedding the original question if HyDE failed
-            hyp_vec = embed(question)
+            # Step 1: hypothetical answer (same model)
+            hyp_answer, hyde_latency_s, hyp_prompt_tok, hyp_completion_tok = \
+                generate_hypothetical_answer(args.model_url, args.model, question)
 
-        # Step 3: Retrieve top-k chunks using the hypothetical-answer vector
-        retrieved = retrieve(hyp_vec, chunk_vecs, chunks) if hyp_vec is not None else []
+            # Step 2: embed the hypothetical answer (fallback to question on failure)
+            hyp_vec = embed(hyp_answer) if hyp_answer else embed(question)
 
-        # Step 4: Build the final prompt with original question + retrieved context
-        prompt = build_rag_prompt(question, retrieved)
+            # Step 3: retrieve using the hypothetical-answer vector
+            retrieved = retrieve(hyp_vec, chunk_vecs, chunks) if hyp_vec is not None else []
+            sources = "; ".join({c["source_file"] for c in retrieved})
+            retrieved_context = json.dumps([c["chunk_text"] for c in retrieved], ensure_ascii=False)
 
-        # Step 5a: Gemma final answer
-        gemma_resp, gemma_latency = chat_completion(GEMMA_URL, GEMMA_MODEL, prompt)
-        print(f"  Gemma  {gemma_latency:.0f}ms — {gemma_resp[:60]!r}")
+            # Step 4: final answer with retrieved context
+            prompt = build_rag_prompt(question, retrieved)
+            answer, answer_latency_s, ans_prompt_tok, ans_completion_tok = \
+                chat_completion(args.model_url, args.model, prompt)
 
-        # Step 5b: Qwen final answer
-        qwen_resp, qwen_latency = chat_completion(QWEN_URL, QWEN_MODEL, prompt)
-        print(f"  Qwen   {qwen_latency:.0f}ms — {qwen_resp[:60]!r}")
+            total_latency_s   = round(hyde_latency_s + answer_latency_s, 3)
+            prompt_tokens     = hyp_prompt_tok + ans_prompt_tok
+            completion_tokens = hyp_completion_tok + ans_completion_tok
+            tokens_used       = prompt_tokens + completion_tokens
 
-        total_latency = round((time.monotonic() - t_total_start) * 1000, 1)
+            cost_per_query_usd, equivalent_api_cost_usd = compute_costs(
+                total_latency_s, prompt_tokens, completion_tokens,
+                args.gpu_hourly_rate, args.api_input_cost_per_m, args.api_output_cost_per_m,
+            )
 
-        results.append({
-            "question_id":         qid,
-            "question":            question,
-            "expected_answer":     expected,
-            "type":                qtype,
-            "hypothetical_answer": hyp_answer,
-            "hyde_latency_ms":     hyde_latency,
-            "retrieved_chunks":    retrieved,
-            "gemma_response":      gemma_resp,
-            "qwen_response":       qwen_resp,
-            "gemma_latency_ms":    gemma_latency,
-            "qwen_latency_ms":     qwen_latency,
-            "total_latency_ms":    total_latency,
-            "gemma_score_by_qwen": 0,   # filled in judging phase
-            "qwen_score_by_gemma": 0,
-        })
+            print(f"  HyDE {hyde_latency_s:.2f}s + answer {answer_latency_s:.2f}s "
+                  f"= {total_latency_s:.2f}s  ${cost_per_query_usd:.6f}/query — {answer[:60]!r}")
 
-    # ── Cross-judge ───────────────────────────────────────────────────────────
-    print(f"\nCross-judging {len(results)} answers …\n")
+            writer.writerow({
+                "id":                      qid,
+                "type":                    qtype,
+                "source":                  sources,
+                "question":                question,
+                "ideal_answer":            expected,
+                "hypothetical_answer":     hyp_answer,
+                "generated_answer":        answer,
+                "retrieved_context":       retrieved_context,
+                "hyde_latency_s":          hyde_latency_s,
+                "answer_latency_s":        answer_latency_s,
+                "total_latency_s":         total_latency_s,
+                "prompt_tokens":           prompt_tokens,
+                "completion_tokens":       completion_tokens,
+                "tokens_used":             tokens_used,
+                "embedding_model":         EMBEDDING_MODEL,
+                "llm_model":               args.model,
+                "cost_per_query_usd":      cost_per_query_usd,
+                "gpu_hourly_rate_usd":     args.gpu_hourly_rate,
+                "equivalent_api_cost_usd": equivalent_api_cost_usd,
+            })
 
-    for idx, r in enumerate(results, 1):
-        qid = r["question_id"]
-        print(f"[{idx}/{len(results)}] Judging {qid} …")
-
-        # Qwen judges Gemma
-        r["gemma_score_by_qwen"] = judge_answer(
-            QWEN_URL, QWEN_MODEL,
-            r["question"], r["expected_answer"], r["gemma_response"],
-        )
-        # Gemma judges Qwen
-        r["qwen_score_by_gemma"] = judge_answer(
-            GEMMA_URL, GEMMA_MODEL,
-            r["question"], r["expected_answer"], r["qwen_response"],
-        )
-        print(f"  gemma_score_by_qwen={r['gemma_score_by_qwen']}  "
-              f"qwen_score_by_gemma={r['qwen_score_by_gemma']}")
-
-    # ── Save results ──────────────────────────────────────────────────────────
-    output_path = os.path.join(OUTPUT_DIR, "hyde_results.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"\nResults saved → {output_path}")
-
-    # ── Summary table ─────────────────────────────────────────────────────────
-    def stats(records, score_key, latency_key):
-        scores    = [r[score_key]    for r in records]
-        latencies = [r[latency_key]  for r in records]
-        n = len(scores)
-        return {
-            "n":           n,
-            "avg_score":   round(sum(scores) / n, 2)    if n else 0,
-            "avg_latency": round(sum(latencies) / n, 1) if n else 0,
-            "pct_zeros":   round(scores.count(0) / n * 100, 1) if n else 0,
-        }
-
-    def avg_hyde_latency(records):
-        lats = [r["hyde_latency_ms"] for r in records]
-        return round(sum(lats) / len(lats), 1) if lats else 0
-
-    semantic      = [r for r in results if r["type"] == "semantic"]
-    deterministic = [r for r in results if r["type"] == "deterministic"]
-
-    print("\n" + "=" * 68)
-    print("HYDE EVALUATION SUMMARY")
-    print("=" * 68)
-
-    for label, subset in [
-        ("ALL",           results),
-        ("Deterministic", deterministic),
-        ("Semantic",      semantic),
-    ]:
-        gs  = stats(subset, "gemma_score_by_qwen", "gemma_latency_ms")
-        qs  = stats(subset, "qwen_score_by_gemma", "qwen_latency_ms")
-        hdl = avg_hyde_latency(subset)
-        print(f"\n── {label} ({gs['n']} questions) ──")
-        print(f"  {'Model':<8}  {'Avg score':>9}  {'Avg lat(ms)':>11}  {'% zeros':>7}")
-        print(f"  {'Gemma':<8}  {gs['avg_score']:>9}  {gs['avg_latency']:>11}  {gs['pct_zeros']:>6}%")
-        print(f"  {'Qwen':<8}  {qs['avg_score']:>9}  {qs['avg_latency']:>11}  {qs['pct_zeros']:>6}%")
-        print(f"  Avg HyDE generation latency: {hdl} ms (extra cost per question)")
-
-    print("\n" + "=" * 68)
+    print(f"\nResults saved → {args.output}")
 
 
 if __name__ == "__main__":

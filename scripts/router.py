@@ -2,8 +2,9 @@ import re
 
 
 def normalize(query: str) -> str:
-    """Lowercase and strip punctuation."""
-    return re.sub(r"[^\w\s]", "", query.lower())
+    """Lowercase, turn hyphens/underscores into word breaks, strip remaining punctuation."""
+    q = re.sub(r"[-_]", " ", query.lower())
+    return re.sub(r"[^\w\s]", "", q)
 
 
 def classify(query: str) -> dict:
@@ -92,6 +93,8 @@ def classify(query: str) -> dict:
             ({"currency", "currencies"},            ["currency", "supported"]),
             ({"capture"},                           ["capture", "window", "days"]),
             ({"partial"},                           ["partial", "refund", "minimum", "amount"]),
+            ({"refund", "days"},                    ["refund", "days", "window"]),
+            ({"refunds", "days"},                   ["refund", "days", "window"]),
             ({"refund"},                            ["refund", "maximum", "payment"]),
             ({"refunds"},                           ["refund", "maximum", "payment"]),
             ({"description"},                       ["description", "maximum", "characters", "payment"]),

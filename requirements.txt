@@ -5,3 +5,6 @@ sentence-transformers
 fastapi
 uvicorn
 torch
+ragas
+datasets
+langchain-openai
