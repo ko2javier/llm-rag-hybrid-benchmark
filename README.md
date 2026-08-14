@@ -65,6 +65,14 @@ All RAGAS scores above were computed with a local **Mistral 7B Instruct** judge,
 
 *(first value = gpt-4o judge, second = local Mistral-7B judge, same 10-row sample per model)*
 
+Both judges' scores were attached side by side to the same Langfuse traces, so any single query's dual-judge comparison is inspectable in the UI:
+
+![Trace detail with both judges' scores attached](docs/langfuse/trace_detail_dual_judge_scores.jpg)
+
+Aggregated across all sampled traces, Langfuse's built-in score analytics confirm the same direction found per-model above (`faithfulness`: local mean 0.90 vs gpt-4o mean 0.94):
+
+![Langfuse analytics: faithfulness score comparison](docs/langfuse/analytics_faithfulness_comparison.jpg)
+
 **Conclusion: the judge model changes RAGAS scores systematically, not just as sampling noise.** gpt-4o is consistently more generous on faithfulness/answer_relevancy and consistently stricter on context_precision/context_recall, in the same direction across all 3 evaluated models. That consistency of direction across independent runs is stronger evidence of judge bias than any single delta in isolation. Practical implication: **any report citing RAGAS numbers should name the judge model** — "faithfulness = 0.90" is an incomplete claim without it. Not yet done: re-scoring the full 150-row set, or testing a third judge to isolate "gpt-4o specifically" vs. "any frontier judge vs. a local 7B."
 
 ## Next steps
