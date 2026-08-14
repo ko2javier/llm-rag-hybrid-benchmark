@@ -53,6 +53,20 @@ Full breakdown in [`results/REPORT_FASE2_RESULTS.md`](results/REPORT_FASE2_RESUL
 
 **Exp B (HyDE, semantic questions only):** confirms the hypothesis cleanly — `context_recall` improves in all three models, and the model that gains the most is exactly the one that needed it most: Gemma 4 31B, which had the worst semantic faithfulness in Exp A (0.833), jumps to 0.934 (+0.101) and recall +0.127. Costs ~2.5-3x more latency/query than plain semantic RAG (two LLM calls instead of one) — a reasonable trade if semantic/narrative questions are a meaningful share of expected production traffic.
 
+## Methodology check — does the RAGAS judge model matter? (14 Aug 2026)
+
+All RAGAS scores above were computed with a local **Mistral 7B Instruct** judge, chosen for cost/risk reasons (no paid API key exposed on a third-party rented GPU). To check whether that choice affects the reported numbers, traces from Exp A were ingested into a self-hosted [Langfuse](https://langfuse.com) instance and a 10-row-per-model sample (30 rows total) was re-scored with **gpt-4o** as an alternative judge, via the OpenAI API. Full methodology and per-metric deltas in [`POSTMORTEM.md`](POSTMORTEM.md) (§H1).
+
+| Model | Faithfulness | Answer relevancy | Context precision | Context recall |
+|---|---|---|---|---|
+| Gemma 3 27B | 0.825 vs 0.792 (gpt-4o ↑) | 0.946 vs 0.876 (↑) | 0.775 vs 0.958 (↓) | 0.900 vs 0.983 (↓) |
+| Gemma 4 31B | 1.000 vs 0.900 (↑) | 0.987 vs 0.951 (↑) | 0.775 vs 0.916 (↓) | 0.900 vs 0.975 (↓) |
+| Qwen 32B | 0.980 vs 0.817 (↑) | 0.891 vs 0.872 (↑) | 0.775 vs 0.953 (↓) | 0.900 vs 0.988 (↓) |
+
+*(first value = gpt-4o judge, second = local Mistral-7B judge, same 10-row sample per model)*
+
+**Conclusion: the judge model changes RAGAS scores systematically, not just as sampling noise.** gpt-4o is consistently more generous on faithfulness/answer_relevancy and consistently stricter on context_precision/context_recall, in the same direction across all 3 evaluated models. That consistency of direction across independent runs is stronger evidence of judge bias than any single delta in isolation. Practical implication: **any report citing RAGAS numbers should name the judge model** — "faithfulness = 0.90" is an incomplete claim without it. Not yet done: re-scoring the full 150-row set, or testing a third judge to isolate "gpt-4o specifically" vs. "any frontier judge vs. a local 7B."
+
 ## Next steps
 
 - **Fix the Exp D fact-lookup prompt** — `build_fact_prompt()` currently injects the `api_facts` value as raw JSON; try a templated sentence instead ("The {plan} plan allows {limit} requests per {window}.") to see if that closes the faithfulness gap on Gemma 4/Qwen without losing the precision/recall win.
