@@ -317,4 +317,21 @@ results/
 
 ---
 
-*Report generated from real execution data on Vast.ai (31 July 2026, §1-11; 01 August 2026, §12-14). All cost, latency, and RAGAS figures come from the CSVs listed above — none are estimates.*
+## 15. Methodology check — does the RAGAS judge model matter? (14-15 Aug 2026)
+
+All RAGAS scores in this report (§6, §12, §13) were computed with a local judge, **Mistral 7B Instruct**, chosen for cost/risk reasons (no paid API key exposed on a third-party rented GPU). To check whether that choice affects the reported numbers, traces from Exp A were ingested into a self-hosted [Langfuse](https://langfuse.com) instance and re-scored with two independent frontier judges — **gpt-4o** (OpenAI) and **DeepSeek-v4-pro** (DeepSeek) — across the **full 150-row set** (all 3 models × 50 questions), not just a sample. Full methodology, the initial 30-row sample, and per-metric deltas in [`POSTMORTEM.md`](../POSTMORTEM.md) (§H1).
+
+**Final table, average of the 3 models, 150/150 rows, no missing data:**
+
+| Metric | Mistral (local) | gpt-4o | DeepSeek | Read |
+|---|---|---|---|---|
+| `context_precision` | 0.963 | 0.767 (−0.196) | 0.776 (−0.187) | **Judge-general effect** — near-identical magnitude across 2 unrelated vendors |
+| `context_recall` | 0.901 | 0.807 (−0.094) | 0.780 (−0.121) | **Judge-general effect** — same direction, similar magnitude |
+| `answer_relevancy` | 0.857 | 0.901 (+0.044) | 0.871 (+0.014) | Same direction, but gpt-4o's effect is ~3x DeepSeek's — judge-specific magnitude, not generic |
+| `faithfulness` | 0.899 | 0.902 (+0.003) | 0.915 (+0.016) | **No consistent effect** — a real revision of the original 30-row finding |
+
+**Conclusion:** `context_precision` and `context_recall` show a real, systematic **local-vs-frontier judge effect** — near-identical magnitude between two architecturally unrelated vendors (OpenAI, DeepSeek), not a gpt-4o quirk, not sampling noise. `answer_relevancy` keeps its direction but the magnitude is judge-specific. The initial 30-row sample suggested `faithfulness` scored consistently higher under gpt-4o across all 3 models; with full 150-row coverage and a second independent judge, that pattern does **not** hold — per-model deltas are mixed in sign and the aggregate is nearly flat for both frontier judges. This is a real revision of the original claim, not just confirmation at scale. The practical implication stands regardless: **any report citing RAGAS numbers should name the judge model.**
+
+---
+
+*Report generated from real execution data on Vast.ai (31 July 2026, §1-11; 01 August 2026, §12-14; 14-15 August 2026, §15). All cost, latency, and RAGAS figures come from the CSVs listed above — none are estimates.*

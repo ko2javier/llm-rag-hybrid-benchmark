@@ -53,27 +53,28 @@ Full breakdown in [`results/REPORT_FASE2_RESULTS.md`](results/REPORT_FASE2_RESUL
 
 **Exp B (HyDE, semantic questions only):** confirms the hypothesis cleanly — `context_recall` improves in all three models, and the model that gains the most is exactly the one that needed it most: Gemma 4 31B, which had the worst semantic faithfulness in Exp A (0.833), jumps to 0.934 (+0.101) and recall +0.127. Costs ~2.5-3x more latency/query than plain semantic RAG (two LLM calls instead of one) — a reasonable trade if semantic/narrative questions are a meaningful share of expected production traffic.
 
-## Methodology check — does the RAGAS judge model matter? (14 Aug 2026)
+## Methodology check — does the RAGAS judge model matter? (14–15 Aug 2026)
 
-All RAGAS scores above were computed with a local **Mistral 7B Instruct** judge, chosen for cost/risk reasons (no paid API key exposed on a third-party rented GPU). To check whether that choice affects the reported numbers, traces from Exp A were ingested into a self-hosted [Langfuse](https://langfuse.com) instance and a 10-row-per-model sample (30 rows total) was re-scored with **gpt-4o** as an alternative judge, via the OpenAI API. Full methodology and per-metric deltas in [`POSTMORTEM.md`](POSTMORTEM.md) (§H1).
+All RAGAS scores above were computed with a local **Mistral 7B Instruct** judge, chosen for cost/risk reasons (no paid API key exposed on a third-party rented GPU). To check whether that choice affects the reported numbers, traces from Exp A were ingested into a self-hosted [Langfuse](https://langfuse.com) instance and re-scored with two independent frontier judges — **gpt-4o** (OpenAI) and **DeepSeek-v4-pro** (DeepSeek) — across the **full 150-row set** (all 3 models × 50 questions), not just a sample. Full methodology, the initial 30-row sample, and per-metric deltas in [`POSTMORTEM.md`](POSTMORTEM.md) (§H1).
 
-| Model | Faithfulness | Answer relevancy | Context precision | Context recall |
+**Final table, average of the 3 models, 150/150 rows, no missing data:**
+
+| Metric | Mistral (local) | gpt-4o | DeepSeek | Read |
 |---|---|---|---|---|
-| Gemma 3 27B | 0.825 vs 0.792 (gpt-4o ↑) | 0.946 vs 0.876 (↑) | 0.775 vs 0.958 (↓) | 0.900 vs 0.983 (↓) |
-| Gemma 4 31B | 1.000 vs 0.900 (↑) | 0.987 vs 0.951 (↑) | 0.775 vs 0.916 (↓) | 0.900 vs 0.975 (↓) |
-| Qwen 32B | 0.980 vs 0.817 (↑) | 0.891 vs 0.872 (↑) | 0.775 vs 0.953 (↓) | 0.900 vs 0.988 (↓) |
-
-*(first value = gpt-4o judge, second = local Mistral-7B judge, same 10-row sample per model)*
+| `context_precision` | 0.963 | 0.767 (−0.196) | 0.776 (−0.187) | **Judge-general effect** — near-identical magnitude across 2 unrelated vendors |
+| `context_recall` | 0.901 | 0.807 (−0.094) | 0.780 (−0.121) | **Judge-general effect** — same direction, similar magnitude |
+| `answer_relevancy` | 0.857 | 0.901 (+0.044) | 0.871 (+0.014) | Same direction, but gpt-4o's effect is ~3x DeepSeek's — judge-specific magnitude, not generic |
+| `faithfulness` | 0.899 | 0.902 (+0.003) | 0.915 (+0.016) | **No consistent effect** — a real revision of the original finding below |
 
 Both judges' scores were attached side by side to the same Langfuse traces, so any single query's dual-judge comparison is inspectable in the UI:
 
 ![Trace detail with both judges' scores attached](docs/langfuse/trace_detail_dual_judge_scores.jpg)
 
-Aggregated across all sampled traces, Langfuse's built-in score analytics confirm the same direction found per-model above (`faithfulness`: local mean 0.90 vs gpt-4o mean 0.94):
+Aggregated across all sampled traces, Langfuse's built-in score analytics confirm the same direction found per-model above (`faithfulness`: local mean 0.90 vs gpt-4o mean 0.94, from the original 30-row sample):
 
 ![Langfuse analytics: faithfulness score comparison](docs/langfuse/analytics_faithfulness_comparison.jpg)
 
-**Conclusion: the judge model changes RAGAS scores systematically, not just as sampling noise.** gpt-4o is consistently more generous on faithfulness/answer_relevancy and consistently stricter on context_precision/context_recall, in the same direction across all 3 evaluated models. That consistency of direction across independent runs is stronger evidence of judge bias than any single delta in isolation. Practical implication: **any report citing RAGAS numbers should name the judge model** — "faithfulness = 0.90" is an incomplete claim without it. Not yet done: re-scoring the full 150-row set, or testing a third judge to isolate "gpt-4o specifically" vs. "any frontier judge vs. a local 7B."
+**Conclusion, revised with full data:** `context_precision`/`context_recall` are a genuine, systematic **local-vs-frontier judge effect** — near-identical magnitude between two architecturally unrelated vendors (OpenAI, DeepSeek), not a gpt-4o quirk, not sampling noise. `answer_relevancy` keeps its direction but the magnitude is judge-specific. The initial 30-row sample also suggested `faithfulness` scored consistently higher under gpt-4o across all 3 models — with full 150-row coverage and a second independent judge, that does **not** hold: per-model deltas are mixed in sign and the aggregate is nearly flat for both frontier judges. This is a real revision of the original claim, not just "confirmed at scale." Practical implication stands regardless: **any report citing RAGAS numbers should name the judge model.**
 
 ## Next steps
 

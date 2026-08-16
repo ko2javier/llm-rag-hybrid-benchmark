@@ -315,4 +315,21 @@ results/
 
 ---
 
-*Informe generado a partir de datos reales de ejecución en Vast.ai (31 julio 2026, §1-11; 01 agosto 2026, §12-14). Todas las cifras de coste, latencia y RAGAS provienen de los CSV listados, no son estimaciones.*
+## 15. Comprobación de metodología — ¿importa el modelo juez de RAGAS? (14-15 ago 2026)
+
+Todas las puntuaciones RAGAS de este informe (§6, §12, §13) se calcularon con un juez local, **Mistral 7B Instruct**, elegido por motivos de coste/riesgo (no exponer una API key de pago en una instancia de Vast.ai de terceros). Para comprobar si esa elección afecta a los números reportados, las trazas de Exp A se ingirieron en una instancia self-hosted de [Langfuse](https://langfuse.com) y se re-puntuaron con dos jueces de frontera independientes — **gpt-4o** (OpenAI) y **DeepSeek-v4-pro** (DeepSeek) — sobre el **conjunto completo de 150 filas** (los 3 modelos × 50 preguntas), no solo una muestra. Metodología completa, la muestra inicial de 30 filas y los deltas por métrica en [`POSTMORTEM.md`](../POSTMORTEM.md) (§H1).
+
+**Tabla final, promedio de los 3 modelos, 150/150 filas, sin datos faltantes:**
+
+| Métrica | Mistral (local) | gpt-4o | DeepSeek | Lectura |
+|---|---|---|---|---|
+| `context_precision` | 0.963 | 0.767 (−0.196) | 0.776 (−0.187) | **Efecto robusto, judge-general** — magnitud casi idéntica entre los 2 jueces de frontera |
+| `context_recall` | 0.901 | 0.807 (−0.094) | 0.780 (−0.121) | **Efecto robusto, judge-general** — misma dirección, magnitud similar |
+| `answer_relevancy` | 0.857 | 0.901 (+0.044) | 0.871 (+0.014) | Misma dirección, pero el efecto de gpt-4o es ~3x mayor que el de DeepSeek — más específico del juez que genérico |
+| `faithfulness` | 0.899 | 0.902 (+0.003) | 0.915 (+0.016) | **Sin efecto consistente** — revisión real frente al hallazgo original de la muestra de 30 filas |
+
+**Conclusión:** `context_precision` y `context_recall` muestran un efecto real y sistemático **juez-local-vs-frontera** — magnitud casi idéntica entre dos proveedores arquitectónicamente distintos (OpenAI, DeepSeek), no una particularidad de gpt-4o ni ruido de muestreo. `answer_relevancy` mantiene la dirección pero con magnitud dependiente del juez concreto. La muestra inicial de 30 filas sugería que `faithfulness` subía consistentemente con gpt-4o en los 3 modelos; con las 150 filas completas y un segundo juez independiente, ese patrón **no se sostiene** — los deltas por modelo cambian de signo y el promedio global queda prácticamente plano en ambos jueces de frontera. Es una revisión real del hallazgo original, no solo una confirmación a mayor escala. La implicación práctica se mantiene: **cualquier informe que cite métricas RAGAS debería nombrar el juez usado.**
+
+---
+
+*Informe generado a partir de datos reales de ejecución en Vast.ai (31 julio 2026, §1-11; 01 agosto 2026, §12-14; 14-15 agosto 2026, §15). Todas las cifras de coste, latencia y RAGAS provienen de los CSV listados, no son estimaciones.*

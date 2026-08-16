@@ -137,10 +137,40 @@ elegido no importa. Este resultado confirma que **sí importa, y de forma sistem
 un número de RAGAS sin nombrar qué juez lo calculó es una comparación incompleta. Vale la pena
 dejar esto explícito en cualquier informe que cite las métricas de Fase 2 de ahora en más.
 
-**No se hizo hoy, y quedaría como siguiente paso si se retoma:** repetir la comparación sobre las
-150 filas completas (no solo la muestra de 30) para confirmar que la magnitud del sesgo se
-mantiene, y/o probar un tercer juez (ej. Claude o Gemini vía API) para ver si el patrón es
-"gpt-4o específicamente" o "cualquier juez de frontera vs. un modelo 7B local".
+**Actualización 2026-08-15 — extendido a las 150 filas completas y a un tercer juez
+(DeepSeek-v4-pro), con datos ya sin huecos.** El re-puntuado completo con gpt-4o sufrió pérdida de
+datos por rate-limit de OpenAI (hasta 34% de celdas en `context_recall` para qwen32b) — se
+verificó que el hueco **no era aleatorio**: las filas perdidas tenían un contexto recuperado
+~40-50% más largo de media que las filas con dato, consistente en los 3 modelos, lo que habría
+sesgado cualquier media calculada solo con las filas disponibles hacia las preguntas de contexto
+corto. Se rellenaron las ~108 celdas faltantes con un segundo paso (`ragas_gpt4o_fill_missing.py`,
+concurrencia baja — `max_workers=2` vs. el 16 por defecto — para respetar el límite de tokens/min)
+hasta cobertura 150/150. Se añadió además **DeepSeek-v4-pro** como tercer juez, independiente de
+OpenAI y de Anthropic, para aislar si el efecto era "gpt-4o específicamente" o "cualquier juez de
+frontera" — pregunta que el hallazgo original dejaba abierta.
+
+**Tabla final, promedio de los 3 modelos, 150/150 filas, sin datos faltantes:**
+
+| Métrica | Mistral (local) | gpt-4o | DeepSeek | Lectura |
+|---|---|---|---|---|
+| `context_precision` | 0.963 | 0.767 (−0.196) | 0.776 (−0.187) | **Efecto robusto, judge-general** — magnitud casi idéntica entre los 2 jueces de frontera |
+| `context_recall` | 0.901 | 0.807 (−0.094) | 0.780 (−0.121) | **Efecto robusto, judge-general** — misma dirección, magnitud similar |
+| `answer_relevancy` | 0.857 | 0.901 (+0.044) | 0.871 (+0.014) | Misma dirección, pero el efecto de gpt-4o es ~3x mayor que el de DeepSeek — más específico del juez que genérico |
+| `faithfulness` | 0.899 | 0.902 (+0.003) | 0.915 (+0.016) | **Sin efecto consistente** — revisión real frente al hallazgo original |
+
+**Esto revisa, no solo confirma, la tabla original de la muestra de 30 filas.** El hallazgo inicial
+decía que `faithfulness` subía consistentemente con gpt-4o (+0.03 a +0.16) en los 3 modelos. Con
+las 150 filas completas y un segundo juez independiente, `faithfulness` **no muestra ningún patrón
+judge-general** — por modelo el signo cambia (gemma3 −0.030, gemma4 +0.072, qwen32b −0.034 con
+gpt-4o) y la media global queda prácticamente plana en ambos jueces de frontera (+0.003 y +0.016).
+`answer_relevancy` sí mantiene la dirección pero con magnitud claramente dependiente del juez
+concreto (gpt-4o +0.044 vs. DeepSeek +0.014) — tampoco es un efecto genérico y uniforme como se
+pensaba inicialmente.
+
+**Lo que sí queda confirmado y reforzado:** `context_precision` y `context_recall` son un efecto
+real, sistemático y **genérico de juez-local-vs-frontier** — no una particularidad de gpt-4o, no
+ruido de muestra, y no un artefacto de datos incompletos. Es la parte del hallazgo original que se
+sostiene sin matices tras la verificación completa.
 
 ## Estado final
 
