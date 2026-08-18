@@ -76,6 +76,10 @@ Aggregated across all sampled traces, Langfuse's built-in score analytics confir
 
 **Conclusion, revised with full data:** `context_precision`/`context_recall` are a genuine, systematic **local-vs-frontier judge effect** — near-identical magnitude between two architecturally unrelated vendors (OpenAI, DeepSeek), not a gpt-4o quirk, not sampling noise. `answer_relevancy` keeps its direction but the magnitude is judge-specific. The initial 30-row sample also suggested `faithfulness` scored consistently higher under gpt-4o across all 3 models — with full 150-row coverage and a second independent judge, that does **not** hold: per-model deltas are mixed in sign and the aggregate is nearly flat for both frontier judges. This is a real revision of the original claim, not just "confirmed at scale." Practical implication stands regardless: **any report citing RAGAS numbers should name the judge model.**
 
+## Related work
+
+This benchmark's retrieval/embedding infrastructure (chunking, bge-m3 embeddings, `router.py`) is reused as the foundation for [llm-agent-mcp-eval](https://github.com/ko2javier/llm-agent-mcp-eval), a follow-up project that adds tool-calling agent behavior on top of it — MCP, multi-turn persona evaluation, and a tool-design bug root-caused across three model vendors. Findings from both projects are synthesized in the [Evaluation Engineering — Calibration Record](https://cv.ko2-oreilly.com/calibration-record).
+
 ## Next steps
 
 - **Fix the Exp D fact-lookup prompt** — `build_fact_prompt()` currently injects the `api_facts` value as raw JSON; try a templated sentence instead ("The {plan} plan allows {limit} requests per {window}.") to see if that closes the faithfulness gap on Gemma 4/Qwen without losing the precision/recall win.
@@ -93,4 +97,4 @@ results/           # Exp A results: report + per-model CSVs (latency, cost, RAGA
 
 ## Author
 
-K. Jabier O'Reilly — [cv.ko2-oreilly.com](https://cv.ko2-oreilly.com) — [@ko2javier](https://github.com/ko2javier)
+K. Jabier O'Reilly — [cv.ko2-oreilly.com](https://cv.ko2-oreilly.com) — [@ko2javier](https://github.com/ko2javier) — [Calibration Record](https://cv.ko2-oreilly.com/calibration-record)
