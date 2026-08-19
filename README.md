@@ -55,8 +55,7 @@ Full breakdown in [`results/REPORT_FASE2_RESULTS.md`](results/REPORT_FASE2_RESUL
 
 ## Methodology check — does the RAGAS judge model matter? (14–15 Aug 2026)
 
-All RAGAS scores above were computed with a local **Mistral 7B Instruct** judge, chosen for cost/risk reasons (no paid API key exposed on a third-party rented GPU). To check whether that choice affects the reported numbers, traces from Exp A were ingested into a self-hosted [Langfuse](https://langfuse.com) instance and re-scored with two independent frontier judges — **gpt-4o** (OpenAI) and **DeepSeek-v4-pro** (DeepSeek) — across the **full 150-row set** (all 3 models × 50 questions), not just a sample. Full methodology, the initial 30-row sample, and per-metric deltas in [`POSTMORTEM.md`](POSTMORTEM.md) (§H1).
-
+All RAGAS scores above were computed with a local **Mistral 7B Instruct** judge, chosen for cost/risk reasons (no paid API key exposed on a third-party rented GPU). To check whether that choice affects the reported numbers, traces from Exp A were ingested into a self-hosted [Langfuse](https://langfuse.com) instance and re-scored with two independent frontier judges — **gpt-4o** (OpenAI) and **DeepSeek-v4-pro** (DeepSeek) — across the **full 150-row set** (all 3 models × 50 questions), not just a sample.
 **Final table, average of the 3 models, 150/150 rows, no missing data:**
 
 | Metric | Mistral (local) | gpt-4o | DeepSeek | Read |

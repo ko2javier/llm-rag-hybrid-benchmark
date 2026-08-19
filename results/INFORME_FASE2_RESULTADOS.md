@@ -317,8 +317,7 @@ results/
 
 ## 15. Comprobación de metodología — ¿importa el modelo juez de RAGAS? (14-15 ago 2026)
 
-Todas las puntuaciones RAGAS de este informe (§6, §12, §13) se calcularon con un juez local, **Mistral 7B Instruct**, elegido por motivos de coste/riesgo (no exponer una API key de pago en una instancia de Vast.ai de terceros). Para comprobar si esa elección afecta a los números reportados, las trazas de Exp A se ingirieron en una instancia self-hosted de [Langfuse](https://langfuse.com) y se re-puntuaron con dos jueces de frontera independientes — **gpt-4o** (OpenAI) y **DeepSeek-v4-pro** (DeepSeek) — sobre el **conjunto completo de 150 filas** (los 3 modelos × 50 preguntas), no solo una muestra. Metodología completa, la muestra inicial de 30 filas y los deltas por métrica en [`POSTMORTEM.md`](../POSTMORTEM.md) (§H1).
-
+Todas las puntuaciones RAGAS de este informe (§6, §12, §13) se calcularon con un juez local, **Mistral 7B Instruct**, elegido por motivos de coste/riesgo (no exponer una API key de pago en una instancia de Vast.ai de terceros). Para comprobar si esa elección afecta a los números reportados, las trazas de Exp A se ingirieron en una instancia self-hosted de [Langfuse](https://langfuse.com) y se re-puntuaron con dos jueces de frontera independientes — **gpt-4o** (OpenAI) y **DeepSeek-v4-pro** (DeepSeek) — sobre el **conjunto completo de 150 filas** (los 3 modelos × 50 preguntas), no solo una muestra.
 **Tabla final, promedio de los 3 modelos, 150/150 filas, sin datos faltantes:**
 
 | Métrica | Mistral (local) | gpt-4o | DeepSeek | Lectura |
