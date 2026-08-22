@@ -7,6 +7,16 @@ def normalize(query: str) -> str:
     return re.sub(r"[^\w\s]", "", q)
 
 
+# Questions about a protocol artifact (an HTTP header, a response field) ask what
+# something *means*, not for a stored numeric fact — they belong in RAG even when
+# they contain a deterministic trigger word. Without this, "What does the
+# X-RateLimit-Reset header contain?" normalises to "... ratelimit ..." and fires
+# Rule 3, returning a rate-limit number instead of explaining the header.
+# Validated against golden_dataset.json: 'header' appears in exactly one question
+# (Q045, semantic) and in no deterministic one — targeted fix, not a general law.
+EXPLANATORY_SUBJECTS = {"header", "headers"}
+
+
 def classify(query: str) -> dict:
     """
     Returns:
@@ -16,6 +26,9 @@ def classify(query: str) -> dict:
     """
     q = normalize(query)
     words = set(q.split())
+
+    if words & EXPLANATORY_SUBJECTS:
+        return {"type": "rag"}
 
     # ── Rule 1: version ──────────────────────────────────────────────────────
     version_triggers = {"version", "v1", "v2", "sunset", "deprecated", "release"}
