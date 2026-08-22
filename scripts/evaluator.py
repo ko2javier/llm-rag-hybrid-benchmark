@@ -5,7 +5,8 @@ Saves results to CSV (no judge), including self-hosted vs API cost columns.
 
 Optionally routes deterministic questions to an exact lookup in the
 `api_facts` Postgres table (via router.classify()) instead of semantic
-retrieval — see --use-router (Exp D).
+retrieval — see --use-router (Exp D) — and/or reorders semantic retrieval with
+a cross-encoder before building the prompt — see --use-reranker (Exp C).
 
 Run from the project root:
     python scripts/evaluator.py --model Qwen/Qwen2.5-32B-Instruct-AWQ \
@@ -14,6 +15,10 @@ Run from the project root:
     # Exp D — router-backed lookup, deterministic questions only:
     python scripts/evaluator.py --model Qwen/Qwen2.5-32B-Instruct-AWQ \
         --output results/qwen_router.csv --use-router --only-type deterministic
+
+    # Exp C — cross-encoder reranking on the semantic questions:
+    python scripts/evaluator.py --model Qwen/Qwen2.5-32B-Instruct-AWQ \
+        --output results/qwen_rerank.csv --use-reranker --only-type semantic
 """
 
 import argparse
@@ -43,6 +48,10 @@ OUTPUT_FILE    = "output/eval_results.csv"
 
 TOP_K           = 5    # chunks to retrieve per question
 MIN_CHUNK_SCORE = 0.0  # cosine similarity threshold
+
+# Exp C — cross-encoder reranking (only used with --use-reranker)
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+RERANK_POOL    = 100   # cosine candidates fed to the reranker; see retrieve()
 
 HTTP_TIMEOUT = 60  # seconds for all outbound HTTP calls
 
@@ -88,8 +97,20 @@ def embed(text: str) -> np.ndarray | None:
 
 
 def retrieve(question_vec: np.ndarray, chunk_vecs: list,
-             chunks: list[dict]) -> list[dict]:
-    """Return TOP_K chunks above MIN_CHUNK_SCORE, sorted by similarity desc."""
+             chunks: list[dict], question: str | None = None,
+             reranker=None) -> list[dict]:
+    """
+    Return TOP_K chunks, sorted best-first.
+
+    Without a reranker: straight cosine top-K (Exp A/B behaviour).
+    With a reranker (Exp C): take the cosine top-RERANK_POOL as candidates, then
+    re-score each (question, chunk) pair with the cross-encoder and keep its
+    top-K. RERANK_POOL matters a lot — measured on this corpus, a pool of 20 is
+    WORSE than no reranker at all (18/25 vs 20/25 hit-rate@5) because the
+    reranker can only shuffle what cosine already ranked highest; the gain comes
+    from rescuing chunks cosine buried deeper. Improvement plateaus at 100
+    (21/25), with no further gain at 200 or 400.
+    """
     scored = []
     for i, cvec in enumerate(chunk_vecs):
         if cvec is None:
@@ -98,8 +119,21 @@ def retrieve(question_vec: np.ndarray, chunk_vecs: list,
         if score >= MIN_CHUNK_SCORE:
             scored.append((score, i))
     scored.sort(reverse=True)
+
+    if reranker is not None and question is not None:
+        candidates = scored[:RERANK_POOL]
+        pairs = [(question, chunks[idx]["chunk_text"]) for _, idx in candidates]
+        rr_scores = reranker.predict(pairs, batch_size=32)
+        reranked = sorted(
+            ((float(rr), idx) for rr, (_, idx) in zip(rr_scores, candidates)),
+            reverse=True,
+        )
+        selected = reranked[:TOP_K]
+    else:
+        selected = scored[:TOP_K]
+
     results = []
-    for score, idx in scored[:TOP_K]:
+    for score, idx in selected:
         results.append({
             "chunk_id":    chunks[idx]["chunk_id"],
             "source_file": chunks[idx]["source_file"],
@@ -124,8 +158,17 @@ def build_rag_prompt(question: str, retrieved: list[dict]) -> str:
     )
 
 
-def build_fact_prompt(question: str, fact_value: dict, source_file: str | None) -> str:
-    context = f"(source: {source_file or 'api_facts'})\n{json.dumps(fact_value, ensure_ascii=False)}"
+def build_fact_prompt(question: str, fact_value: dict, source_file: str | None,
+                       fact_keywords: list[str] | None = None) -> str:
+    # Anchor the raw JSON to the fact's own domain keywords (already computed for
+    # routing) — without this, Gemma4/Qwen sometimes refuse to answer from a bare
+    # {"limit": 50, "unit": "cents"} because nothing in it textually ties to the
+    # question ("partial refund minimum"). See POSTMORTEM.md Exp D fact-prompt fix.
+    # NOTE: deliberately no "(source: ...)" preface here — it invited Gemma4 to
+    # hedge about what "the provided text/source" does or doesn't mention, even
+    # when the fact itself answered the question correctly (see Exp D fix notes).
+    kw_line = f"This fact is about: {', '.join(fact_keywords)}.\n" if fact_keywords else ""
+    context = f"{kw_line}{json.dumps(fact_value, ensure_ascii=False)}"
     return (
         "You are a helpful assistant. Use only the exact fact below to answer precisely.\n\n"
         f"Context:\n{context}\n\n"
@@ -134,11 +177,11 @@ def build_fact_prompt(question: str, fact_value: dict, source_file: str | None) 
     )
 
 
-def lookup_fact(conn, fact_type: str, keywords: list[str]) -> tuple[dict | None, str | None]:
+def lookup_fact(conn, fact_type: str, keywords: list[str]) -> tuple[dict | None, str | None, list[str] | None]:
     """
-    Return (value, source_file) for the api_facts row of the given fact_type
-    with the largest keyword overlap against `keywords`. (None, None) if no
-    row exists for fact_type.
+    Return (value, source_file, fact_keywords) for the api_facts row of the given
+    fact_type with the largest keyword overlap against `keywords`. (None, None, None)
+    if no row exists for fact_type.
     """
     cur = conn.cursor()
     cur.execute(
@@ -148,17 +191,17 @@ def lookup_fact(conn, fact_type: str, keywords: list[str]) -> tuple[dict | None,
     rows = cur.fetchall()
     cur.close()
     if not rows:
-        return None, None
+        return None, None, None
     kw_set = {k.lower() for k in keywords}
-    best_value, best_source, best_overlap = None, None, 0
+    best_value, best_source, best_keywords, best_overlap = None, None, None, 0
     for value, source_file, row_keywords in rows:
         overlap = len(kw_set & {k.lower() for k in row_keywords})
         if overlap > best_overlap:
-            best_value, best_source, best_overlap = value, source_file, overlap
+            best_value, best_source, best_keywords, best_overlap = value, source_file, row_keywords, overlap
     if best_overlap == 0:
         # No real keyword match — don't guess a row at random, signal a miss.
-        return None, None
-    return best_value, best_source
+        return None, None, None
+    return best_value, best_source, best_keywords
 
 
 def chat_completion(model_url: str, model_name: str, prompt: str) -> tuple[str, float, int, int]:
@@ -214,8 +257,21 @@ def compute_costs(latency_s: float, prompt_tokens: int, completion_tokens: int,
 
 # ── Embedding cache ───────────────────────────────────────────────────────────
 
-def embed_all_chunks(chunks: list[dict]) -> list:
-    """Embed every chunk, printing progress."""
+def embed_all_chunks(chunks: list[dict], cache_path: str | None = None) -> list:
+    """
+    Embed every chunk, printing progress. Optionally cached to disk — the chunk
+    embeddings only depend on chunks.json and the embedding model, so repeated
+    runs (different LLM, reranker on/off, repetitions) can reuse them instead of
+    re-embedding the whole corpus each time.
+    """
+    if cache_path and os.path.exists(cache_path):
+        cached = np.load(cache_path)
+        if len(cached) == len(chunks):
+            print(f"Reusing cached chunk embeddings ← {cache_path}")
+            return list(cached)
+        print(f"Cache {cache_path} has {len(cached)} vectors but chunks.json has "
+              f"{len(chunks)} — ignoring stale cache and re-embedding.")
+
     print(f"Embedding {len(chunks)} chunks via TEI …")
     vecs = []
     for i, chunk in enumerate(chunks):
@@ -223,6 +279,10 @@ def embed_all_chunks(chunks: list[dict]) -> list:
         vecs.append(vec)
         if (i + 1) % 20 == 0 or (i + 1) == len(chunks):
             print(f"  {i + 1}/{len(chunks)} chunks embedded")
+
+    if cache_path and all(v is not None for v in vecs):
+        np.save(cache_path, np.array(vecs))
+        print(f"Cached chunk embeddings → {cache_path}")
     return vecs
 
 
@@ -246,11 +306,26 @@ def parse_args():
     parser.add_argument("--only-type", choices=["all", "deterministic", "semantic"], default="all",
                          help="Filtra el dataset a un solo tipo de pregunta antes de correr "
                               "(para re-correr solo un subconjunto sin gastar GPU en el resto).")
+    parser.add_argument("--use-reranker", action="store_true",
+                         help=f"Exp C: reordena con un cross-encoder ({RERANKER_MODEL}) los "
+                              f"{RERANK_POOL} mejores candidatos del coseno antes de quedarse con "
+                              f"los TOP_K. Ojo: pools pequenos (~20) EMPEORAN el resultado "
+                              f"respecto a no usar reranker — ver retrieve().")
+    parser.add_argument("--rerank-pool", type=int, default=RERANK_POOL,
+                         help="Numero de candidatos del coseno que pasan al reranker.")
+    parser.add_argument("--rerank-device", default="cuda",
+                         help="Dispositivo del cross-encoder ('cuda' o 'cpu').")
+    parser.add_argument("--embed-cache", default=None,
+                         help="Ruta .npy para cachear los embeddings de los chunks entre "
+                              "corridas (solo dependen de chunks.json + modelo de embeddings).")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    global RERANK_POOL
+    RERANK_POOL = args.rerank_pool
 
     print("Loading data …")
     chunks  = load_json(CHUNKS_FILE)
@@ -259,7 +334,15 @@ def main():
         dataset = [item for item in dataset if item.get("type") == args.only_type]
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
-    chunk_vecs = embed_all_chunks(chunks)
+    chunk_vecs = embed_all_chunks(chunks, args.embed_cache)
+
+    reranker = None
+    if args.use_reranker:
+        from sentence_transformers import CrossEncoder
+        print(f"Loading reranker {RERANKER_MODEL} on {args.rerank_device} "
+              f"(pool={RERANK_POOL}) …")
+        reranker = CrossEncoder(RERANKER_MODEL, trust_remote_code=True,
+                                 device=args.rerank_device)
 
     db_conn = None
     if args.use_router:
@@ -296,11 +379,12 @@ def main():
                 retrieval_method = "semantic"
                 fact_value = None
                 fact_source = None
+                fact_keywords = None
 
                 if args.use_router:
                     route = router_classify(question)
                     if route["type"] == "deterministic":
-                        fact_value, fact_source = lookup_fact(
+                        fact_value, fact_source, fact_keywords = lookup_fact(
                             db_conn, route["fact_type"], route["keywords"]
                         )
                         if fact_value is not None:
@@ -315,10 +399,15 @@ def main():
                     retrieved_context = json.dumps(
                         [json.dumps(fact_value, ensure_ascii=False)], ensure_ascii=False
                     )
-                    prompt = build_fact_prompt(question, fact_value, fact_source)
+                    prompt = build_fact_prompt(question, fact_value, fact_source, fact_keywords)
                 else:
                     q_vec = embed(question)
-                    retrieved = retrieve(q_vec, chunk_vecs, chunks) if q_vec is not None else []
+                    retrieved = (
+                        retrieve(q_vec, chunk_vecs, chunks, question, reranker)
+                        if q_vec is not None else []
+                    )
+                    if reranker is not None and retrieval_method == "semantic":
+                        retrieval_method = "semantic_reranked"
                     sources = "; ".join({c["source_file"] for c in retrieved})
                     retrieved_context = json.dumps([c["chunk_text"] for c in retrieved], ensure_ascii=False)
                     prompt = build_rag_prompt(question, retrieved)

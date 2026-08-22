@@ -32,7 +32,7 @@ INSERT INTO api_facts (fact_type, keywords, value) VALUES
   ('constraint', ARRAY['capture','window','days'],                  '{"limit": 7, "unit": "days"}'),
   ('constraint', ARRAY['trial','maximum','days','subscription'],    '{"limit": 90, "unit": "days"}'),
   ('constraint', ARRAY['currency','supported'],                     '{"currencies": ["EUR","USD","GBP","CHF","SEK","NOK","DKK"]}'),
-  ('constraint', ARRAY['metadata','maximum','keys'],                '{"max_keys": 50, "max_key_length": 40}'),
+  ('constraint', ARRAY['metadata','maximum','keys','payment'],      '{"max_keys": 50, "max_key_length": 40}'),
   ('constraint', ARRAY['description','maximum','characters','payment'], '{"limit": 255, "unit": "characters"}'),
   ('constraint', ARRAY['webhook','url','maximum','length'],         '{"limit": 2048, "unit": "characters"}'),
   ('constraint', ARRAY['webhook','retry','failed','delivery'],      '{"retries": 5, "backoff": ["1min","5min","30min","2h","8h"]}'),
