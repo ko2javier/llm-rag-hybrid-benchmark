@@ -16,7 +16,7 @@ quality rather than retrieval hit-rate alone.
 
 ## 1. Background: why the judge is a variable, not an oracle
 
-Fase 2 evaluates a self-hosted RAG pipeline over NexusPay, a synthetic payments-API corpus (24
+Phase 2 evaluates a self-hosted RAG pipeline over NexusPay, a synthetic payments-API corpus (24
 markdown files, 50 golden questions split evenly between semantic and deterministic).
 
 Quality is scored with RAGAS, which needs an LLM to act as judge. In July that judge was chosen to
@@ -117,12 +117,31 @@ answer quality.
 | A baseline | 0.777 | 0.866 | 0.920 | 0.880 |
 | B HyDE | 0.774 | 0.890 | 0.923 | 0.882 |
 | C reranker | 0.847 | **0.950** | 0.910 | **0.931** |
-| D router | 0.838 | 0.878 | **0.939** | 0.783 |
-| **C+D** | **0.867** | 0.943 | **0.939** | 0.840 |
+| D router | 0.838 | 0.878 | 0.939 | 0.783 |
+| **C+D** | **0.867** | 0.943 | 0.939 | 0.840 |
 
 Coverage: 2 missing cells out of 9,000 (0.02%), both the schema violations described above.
 
-### 4.1. The headline: `hit@5` was wrong in both directions
+Each configuration ran the same questions on the same models and repetitions, so deltas can be
+paired per (model, repetition, question) and their uncertainty estimated directly — the same
+treatment applied to the judge comparison in §3. Delta against the A baseline, 95% CI, n = 450:
+
+| Config | ctx_precision | ctx_recall | faithfulness | ans_relevancy |
+|---|---|---|---|---|
+| B HyDE | −0.003 [−0.028, +0.022] | +0.023 [−0.004, +0.051] | +0.003 [−0.015, +0.021] | +0.002 [−0.016, +0.020] |
+| C reranker | **+0.070 [+0.049, +0.091]** | **+0.084 [+0.058, +0.109]** | −0.010 [−0.028, +0.008] | **+0.050 [+0.030, +0.070]** |
+| D router | **+0.061 [+0.036, +0.085]** | +0.011 [−0.004, +0.027] | +0.020 [−0.001, +0.041] | **−0.098 [−0.120, −0.075]** |
+| C+D | **+0.090 [+0.064, +0.116]** | **+0.076 [+0.049, +0.102]** | +0.019 [−0.004, +0.042] | **−0.041 [−0.071, −0.010]** |
+
+Bold marks intervals excluding zero. Two consequences worth stating plainly:
+
+- **HyDE moves nothing.** Not one of its four metrics is distinguishable from the baseline, on 450
+  paired observations.
+- **No configuration changes `faithfulness`.** The apparent 0.939 for D and C+D in the table above
+  is not distinguishable from the baseline's 0.920, and neither is C's apparent −0.010. That metric
+  has now shown no effect across four judges *and* five retrieval configurations.
+
+### 4.1. `hit@5` was wrong in both directions
 
 | | What `hit@5` said | What RAGAS says |
 |---|---|---|

@@ -101,8 +101,10 @@ family and architecture as the 7B judge, differing only in size — scored on th
 | A baseline | 0.777 | 0.866 | 0.920 | 0.880 |
 | B HyDE | 0.774 | 0.890 | 0.923 | 0.882 |
 | C reranker | 0.847 | **0.950** | 0.910 | **0.931** |
-| D router | 0.838 | 0.878 | **0.939** | 0.783 |
-| **C+D** | **0.867** | 0.943 | **0.939** | 0.840 |
+| D router | 0.838 | 0.878 | 0.939 | 0.783 |
+| **C+D** | **0.867** | 0.943 | 0.939 | 0.840 |
+
+Deltas are paired per (model, repetition, question), n = 450, so their uncertainty is measurable. **HyDE moves nothing**: not one of its four metrics is distinguishable from the baseline. C+D gains +0.090 context precision, 95% CI [+0.064, +0.116]. And **no configuration changes `faithfulness`** — that metric has now shown no effect across four judges *and* five retrieval configurations.
 
 **`hit@5` was wrong in both directions.** It scored the reranker at +1 question (21 vs 20, indistinguishable from noise) where RAGAS measures +0.070 precision / +0.084 recall consistently across all three models — and it scored HyDE as the highest-ceiling config where RAGAS measures −0.003 precision at ~3× the latency. A metric that errs in both directions is not pessimistic or optimistic; it is not measuring what it was assumed to measure. `hit@5` only asks whether the gold filename is in the top 5, never whether the retrieved passage is usable.
 
