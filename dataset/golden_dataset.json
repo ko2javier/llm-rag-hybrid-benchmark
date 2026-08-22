@@ -175,7 +175,7 @@
     "type": "deterministic",
     "question": "How long do idempotency keys remain valid?",
     "expected_answer": "24 hours",
-    "source_file": "guides/architecture_overview.md",
+    "source_file": "reference/architecture_overview.md",
     "fact_type": "constraint",
     "keywords": ["idempotency", "key", "expiration", "hours"]
   },
@@ -229,63 +229,63 @@
     "type": "semantic",
     "question": "What is the difference between a secret key and a publishable key?",
     "expected_answer": "Secret keys have full API access and must be stored server-side. Publishable keys are read-only and safe for frontend use — they can tokenize payment methods but cannot create payments directly.",
-    "source_file": "guides/authentication.md"
+    "source_file": "reference/authentication.md"
   },
   {
     "id": "Q027",
     "type": "semantic",
     "question": "Why does NexusPay use cursor-based pagination instead of offset pagination?",
     "expected_answer": "Offset pagination has a problem with real-time data: new items shift positions causing duplicates or skipped items. Cursor pagination avoids this by tracking exact position.",
-    "source_file": "guides/pagination_filtering.md"
+    "source_file": "reference/pagination_filtering.md"
   },
   {
     "id": "Q028",
     "type": "semantic",
     "question": "How does the authorization and capture flow work?",
     "expected_answer": "By default, POST /payments authorizes and captures in one step. Setting capture: false authorizes only, holding funds for up to 7 days. You then call POST /payments/:id/capture to complete.",
-    "source_file": "guides/architecture_overview.md"
+    "source_file": "reference/architecture_overview.md"
   },
   {
     "id": "Q029",
     "type": "semantic",
     "question": "Can I rely on webhooks as the primary confirmation of a payment?",
     "expected_answer": "No. Webhook delivery is asynchronous and can be delayed up to 30 seconds. Always confirm payment status via the API directly.",
-    "source_file": "guides/architecture_overview.md"
+    "source_file": "reference/architecture_overview.md"
   },
   {
     "id": "Q030",
     "type": "semantic",
     "question": "How should I rotate API keys without downtime?",
     "expected_answer": "Create the new key, deploy the application with it, then revoke the old key. Revoking is immediate and irreversible.",
-    "source_file": "guides/authentication.md"
+    "source_file": "reference/authentication.md"
   },
   {
     "id": "Q031",
     "type": "semantic",
     "question": "What happens if I submit the same idempotency key twice with different parameters?",
     "expected_answer": "The API returns HTTP 409 with error code idempotency_key_mismatch.",
-    "source_file": "guides/architecture_overview.md"
+    "source_file": "reference/architecture_overview.md"
   },
   {
     "id": "Q032",
     "type": "semantic",
     "question": "How do I paginate through all succeeded EUR payments from Q1 2025?",
     "expected_answer": "Use GET /payments with filters status=succeeded, currency=EUR, from=2025-01-01, to=2025-03-31, limit=100. Use the next_cursor from each response as starting_after until has_more is false.",
-    "source_file": "guides/pagination_filtering.md"
+    "source_file": "reference/pagination_filtering.md"
   },
   {
     "id": "Q033",
     "type": "semantic",
     "question": "What scopes are available for API keys on Pro and Enterprise plans?",
     "expected_answer": "payments:read, payments:write, refunds:write, subscriptions, reports:read, webhooks. Scoped keys are not available on Free or Starter plans.",
-    "source_file": "guides/authentication.md"
+    "source_file": "reference/authentication.md"
   },
   {
     "id": "Q034",
     "type": "semantic",
     "question": "How does NexusPay determine which environment a request goes to?",
     "expected_answer": "By the API key prefix, not the URL. Keys starting with sk_test_ route to sandbox, sk_live_ to live — both use the same base URL.",
-    "source_file": "guides/architecture_overview.md"
+    "source_file": "reference/architecture_overview.md"
   },
   {
     "id": "Q035",
@@ -313,7 +313,7 @@
     "type": "semantic",
     "question": "What security practices does NexusPay recommend for API keys?",
     "expected_answer": "Use environment variables or a secrets manager, never commit to version control, use least-privilege scopes, rotate every 90 days in high-security environments, monitor for unexpected usage spikes.",
-    "source_file": "guides/authentication.md"
+    "source_file": "reference/authentication.md"
   },
   {
     "id": "Q039",
@@ -334,7 +334,7 @@
     "type": "semantic",
     "question": "Where is NexusPay data stored by default?",
     "expected_answer": "EU region, specifically Frankfurt, Germany. US data residency is available on Enterprise plans but cannot be changed after account creation.",
-    "source_file": "guides/architecture_overview.md"
+    "source_file": "reference/architecture_overview.md"
   },
   {
     "id": "Q042",
@@ -348,7 +348,7 @@
     "type": "semantic",
     "question": "What authentication methods are supported for the NexusPay dashboard?",
     "expected_answer": "Two-factor authentication is required for key management. Supported methods: TOTP (Google Authenticator, Authy) or hardware security keys (FIDO2/WebAuthn).",
-    "source_file": "guides/authentication.md"
+    "source_file": "reference/authentication.md"
   },
   {
     "id": "Q044",
@@ -369,7 +369,7 @@
     "type": "semantic",
     "question": "Can plain HTTP connections be used with the NexusPay API?",
     "expected_answer": "No. Plain HTTP is rejected with a connection error, not an HTTP response. All requests must use HTTPS.",
-    "source_file": "guides/architecture_overview.md"
+    "source_file": "reference/architecture_overview.md"
   },
   {
     "id": "Q047",
@@ -383,7 +383,7 @@
     "type": "semantic",
     "question": "What filters can I use when listing subscriptions?",
     "expected_answer": "customer_id, status (active, cancelled, past_due, trialing), and plan_id.",
-    "source_file": "guides/pagination_filtering.md"
+    "source_file": "reference/pagination_filtering.md"
   },
   {
     "id": "Q049",
