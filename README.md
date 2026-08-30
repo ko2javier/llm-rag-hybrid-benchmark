@@ -3,6 +3,8 @@
 RAG hybrid benchmark comparing advanced retrieval techniques and self-hosted inference cost on synthetic API documentation.  
 **Gemma 3 27B AWQ** vs **Qwen 2.5 32B AWQ** vs **Gemma 4 31B AWQ** — bge-m3 embeddings, HyDE, re-ranking, deterministic router, cost-per-query on real GPU pricing.
 
+Extended in Aug 2026 with **[FinanceBench](#external-validation-on-a-public-dataset--financebench-2230-aug-2026)** — the same pipeline on 84 real SEC filings, with human-labelled ground truth and a four-judge meta-evaluation of whether an LLM judge can be trusted at all.
+
 ## What this measures
 
 Building on [llm-rag-benchmark](https://github.com/ko2javier/llm-rag-benchmark), this benchmark addresses the root cause identified in Phase 1-2: the embedding model was the bottleneck.
@@ -110,6 +112,73 @@ Deltas are paired per (model, repetition, question), n = 450, so their uncertain
 
 **Infrastructure finding:** scoring 2,250 rows took **1h08 instead of 10h08 on the same GPU**, by running six client processes against one vLLM server rather than raising RAGAS's `max_workers`. The server was idle 75% of the time with an empty queue — the bottleneck was client-side. Raising `max_workers` to 64 instead ran 27% "faster" while silently losing 47 of 50 `context_precision` cells to timeouts, which only surfaced because the scorer counts missing cells per metric.
 
+## External validation on a public dataset — FinanceBench (22–30 Aug 2026)
+
+Everything above runs on NexusPay, a **synthetic** knowledge base written for this benchmark. That
+is a fair criticism of it, so the same questions were re-asked on a public dataset of **real**
+documents: [FinanceBench](https://github.com/patronus-ai/financebench) — 150 analyst questions over
+84 SEC 10-K/10-Q filings (12,013 pages), with reference answers written by financial analysts.
+
+Full report: [`results/REPORT_FINANCEBENCH.md`](results/REPORT_FINANCEBENCH.md). Data and a
+no-GPU reproduction script: [`results/financebench/`](results/financebench/).
+
+**Setup:** three parsers (`pdftotext`, `pdfplumber`, `docling`) × 3 generators (the same Gemma 3 27B
+/ Qwen 32B / Gemma 4 31B AWQ used above) × 3 retrieval scenarios. 4,500 generations, run serially,
+0 errors. 150 answers labelled blind by a human annotator; 4 LLM judges scored on those same cases.
+
+**Headline findings:**
+
+- **Retrieval is the bottleneck, and the replication is the evidence.** All three models lose
+  **exactly 42.3 points** going from "here is the page" to "search 84 filings"
+  (`+0.423 [+0.269, +0.577]`, identical to three decimals across two vendors). Models differ;
+  retrieval is what they share.
+
+  | | gold page | correct filing given | search 84 filings |
+  |---|---|---|---|
+  | mean of 3 models | 0.897 | 0.603 | 0.474 |
+
+- **Only 6% of failures are picking the wrong company.** 54% retrieve the right filing and the
+  wrong page. Thirty pages of a 10-K mention *property, plant and equipment*; one carries the
+  figure, and semantic similarity does not separate "discusses X" from "contains the value of X".
+- **PDF parser choice does not change answer accuracy** — 36 paired comparisons, none
+  distinguishable from zero. `pdftotext` (0.5 min CPU) matches `docling` (29.5 min GPU). The
+  decision rule was pre-registered before the data existed.
+- **Five retrieved pages are worse than one, even when the right one is among them** — accuracy
+  drops 21–28 points in the corpus scenario. `hit@5` cannot see this by construction, which extends
+  the `hit@5` critique in the section above to a second, independent dataset.
+- **Global agreement does not validate an LLM judge.** Four judges on the same 150 cases:
+
+  | judge | catches real errors | global agreement |
+  |---|---|---|
+  | Nemo 12B (local) | 42.9% | 83.7% |
+  | Claude | 57.1% | 87.8% |
+  | Gemini | 71.4% | **91.8%** |
+  | *approve everything unread* | *0.0%* | *90.5%* |
+
+  The best judge beats looking at nothing by **1.4 points** on the metric usually published, while
+  error detection separates the judges by **71**. This is the meta-evaluation the judge-size study
+  above could not do: it had no human ground truth to check against.
+- **A human gold standard has errors too, and cross-judge disagreement finds them.** 17 of 150
+  labels (11%) proved revisable — in both directions, so not a simple leniency bias. Two of them
+  are errors in the *dataset's* reference, not the annotation.
+- **An evaluator cannot audit the exam it is sitting.** When one of the three judges arbitrated the
+  gold standard, its own score rose to 100%. The contamination is measured rather than assumed: 82%
+  of the revisions match that judge's own prior verdicts, against ~50% for the other two. The
+  published table therefore stays on the original, independent labels.
+
+**Comparison with the original paper, stated carefully:** with the evidence page supplied, the
+three open 4-bit models reach **84.7%** against the **85.3%** the FinanceBench paper reports for
+GPT-4-Turbo in its Oracle configuration. Same dataset, humans judging on both sides — but the
+paper's annotators are financial experts and this study's are not, the answer categories differ,
+and only the Oracle row is comparable at all. Indicative, not strict; the four differences are
+listed in the report.
+
+**Not done, and why:** HyDE and re-ranking were planned and skipped. Perfect retrieval would reach
+0.667–0.727 here, so headroom over the current 0.474 is ~20–25 points; a re-ranker measured at
++0.05 `hit@k` on this corpus captures about 3 of them. Reducing `k` was proposed and discarded the
+same day — at `k=1` the gold page is present 19.2% of the time versus 63.5% at `k=5`, so projected
+accuracy would fall from 0.481 to ~0.215.
+
 ## Related work
 
 This benchmark's retrieval/embedding infrastructure (chunking, bge-m3 embeddings, `router.py`) is reused as the foundation for [llm-agent-mcp-eval](https://github.com/ko2javier/llm-agent-mcp-eval), a follow-up project that adds tool-calling agent behavior on top of it — MCP, multi-turn persona evaluation, and a tool-design bug root-caused across three model vendors. Findings from both projects are synthesized in the [Evaluation Engineering — Calibration Record](https://cv.ko2-oreilly.com/calibration-record).
@@ -129,6 +198,7 @@ dataset/           # Golden dataset — 50 questions
 scripts/           # chunker.py, ingest.py, evaluator.py, hyde.py, router.py, ragas_eval.py
 sql/               # PostgreSQL schema and seed data
 results/           # Exp A results: report + per-model CSVs (latency, cost, RAGAS scores)
+results/financebench/  # FinanceBench: judge-vs-human labels, pre-registration, repro script
 
 ## Author
 
